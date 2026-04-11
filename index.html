@@ -700,10 +700,17 @@ function router(page) {
 }
 
 /* ── ONGLET SÉANCE ── */
-function renderWorkoutTab() {
+function renderWorkoutTab(showActive) {
     const home   = document.getElementById('workout-home');
     const active = document.getElementById('workout-active');
-    // Toujours afficher la vue home à la navigation, le draft est conservé en mémoire
+    // Afficher la vue active si : on le demande explicitement OU si elle est déjà visible
+    if (state.sessionDraft && (showActive || !active.classList.contains('hidden'))) {
+        home.classList.add('hidden');
+        active.classList.remove('hidden');
+        renderActiveSession();
+        return;
+    }
+    // Sinon : vue home (draft conservé en mémoire, accessible via Commencer)
     home.classList.remove('hidden');
     active.classList.add('hidden');
     const sType = state.cycle.nextSession;
@@ -1364,7 +1371,11 @@ function correctLastSession() {
         const last = state.history.pop();
         state.sessionDraft = last;
         save();
-        router('workout');
+        // Forcer l'affichage de la vue active
+        document.getElementById('workout-home').classList.add('hidden');
+        document.getElementById('workout-active').classList.remove('hidden');
+        renderActiveSession();
+        lucide.createIcons();
     });
 }
 
