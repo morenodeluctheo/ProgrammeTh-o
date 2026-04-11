@@ -132,6 +132,12 @@
             </div>
         </div>
         <div id="workout-active" class="hidden">
+            <div class="flex items-center gap-3 mb-4">
+                <button onclick="backToSessionHome()" class="flex items-center gap-2 bg-white border-2 border-slate-100 px-4 py-2.5 rounded-2xl text-[10px] font-black uppercase text-slate-600 tap shadow-sm">
+                    <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Retour
+                </button>
+                <div class="flex-1"></div>
+            </div>
             <div id="active-exercises-list" class="space-y-3"></div>
         </div>
     </section>
@@ -152,21 +158,15 @@
         <div class="bg-white p-6 rounded-[2.5rem] border border-slate-100">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="font-black text-sm uppercase">Progression</h3>
-                <div class="flex items-center gap-2">
-                    <select id="chart-ex-select" onchange="renderProgressChart()" class="text-[10px] font-bold bg-slate-100 border-none rounded-lg px-2 py-1.5 outline-none"></select>
-                    <select id="chart-period-select" onchange="renderProgressChart()" class="text-[10px] font-bold bg-slate-100 border-none rounded-lg px-2 py-1.5 outline-none">
-                        <option value="30">1 mois</option>
-                        <option value="90">3 mois</option>
-                        <option value="180">6 mois</option>
-                        <option value="9999" selected>Tout</option>
-                    </select>
-                </div>
+                <select id="chart-period-select" onchange="renderProgressChart()" class="text-[10px] font-bold bg-slate-100 border-none rounded-lg px-2 py-1.5 outline-none">
+                    <option value="30">1 mois</option>
+                    <option value="90">3 mois</option>
+                    <option value="180">6 mois</option>
+                    <option value="9999" selected>Tout</option>
+                </select>
             </div>
             <canvas id="chart-progress" height="180"></canvas>
-            <div class="flex items-center gap-4 mt-3 text-[10px] font-bold text-slate-400">
-                <span class="flex items-center gap-1"><span class="w-3 h-1 bg-indigo-500 rounded inline-block"></span> 1RM Estimé</span>
-                <span class="flex items-center gap-1"><span class="w-3 h-3 bg-amber-400 rounded-full inline-block"></span> 1RM Réel (test)</span>
-            </div>
+            <div id="chart-legend" class="flex flex-wrap gap-2 mt-4"></div>
         </div>
         <div>
             <h3 class="font-black text-sm uppercase px-1 mb-3">Historique</h3>
@@ -254,15 +254,11 @@
                         class="w-full bg-white/10 border border-white/10 rounded-2xl px-4 py-3 text-sm font-bold text-white placeholder:text-white/30 outline-none focus:border-indigo-400">
                     <button onclick="openSyncHelp()" class="text-[10px] font-bold text-indigo-400 mt-1.5 underline">Comment obtenir un ID npoint.io ?</button>
                 </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <button onclick="saveSyncKey()" class="bg-indigo-600 py-3 rounded-2xl text-[10px] font-black uppercase tap">Enregistrer</button>
-                    <button onclick="pullFromCloud()" class="bg-white/10 py-3 rounded-2xl text-[10px] font-black uppercase tap">↓ Récupérer</button>
-                </div>
-                <button onclick="pushToCloud()" class="w-full bg-white/5 border border-white/10 py-3 rounded-2xl text-[10px] font-black uppercase tap">↑ Envoyer vers Cloud</button>
+                <button onclick="applySyncKey()" class="w-full bg-indigo-600 py-3 rounded-2xl text-[10px] font-black uppercase tap">Enregistrer et synchroniser</button>
             </div>
         </div>
         <div class="text-center pb-4">
-            <button onclick="confirmResetAll()" class="text-red-400 text-[10px] font-black uppercase border border-red-100 px-6 py-3 rounded-2xl tap">Réinitialiser toutes les données</button>
+            <button onclick="confirmResetCloud()" class="text-red-400 text-[10px] font-black uppercase border border-red-100 px-6 py-3 rounded-2xl tap">Réinitialiser le cloud</button>
         </div>
     </section>
 </main>
@@ -707,27 +703,40 @@ function router(page) {
 function renderWorkoutTab() {
     const home   = document.getElementById('workout-home');
     const active = document.getElementById('workout-active');
-    if (state.sessionDraft) {
-        home.classList.add('hidden');
-        active.classList.remove('hidden');
-        renderActiveSession();
-    } else {
-        home.classList.remove('hidden');
-        active.classList.add('hidden');
-        const sType = state.cycle.nextSession;
-        document.getElementById('cycle-badge').innerText = `Cycle ${state.cycle.currentCycle} · Semaine ${state.cycle.currentWeek}`;
-        document.getElementById('next-session-name').innerText = sType;
-        document.getElementById('next-session-desc').innerText = SESSIONS[sType].desc;
-        document.getElementById('estimated-time').innerText = '~' + estimateSessionDuration(sType) + ' min estimées';
-        const btnCorrect = document.getElementById('btn-correct-last');
-        if (state.history.length > 0) btnCorrect.classList.remove('hidden');
-        else btnCorrect.classList.add('hidden');
-        renderSpecialBanner();
-        renderSessionDIndicator();
-    }
+    // Toujours afficher la vue home à la navigation, le draft est conservé en mémoire
+    home.classList.remove('hidden');
+    active.classList.add('hidden');
+    const sType = state.cycle.nextSession;
+    document.getElementById('cycle-badge').innerText = `Cycle ${state.cycle.currentCycle} · Semaine ${state.cycle.currentWeek}`;
+    document.getElementById('next-session-name').innerText = sType;
+    document.getElementById('next-session-desc').innerText = SESSIONS[sType].desc;
+    document.getElementById('estimated-time').innerText = '~' + estimateSessionDuration(sType) + ' min estimées';
+    const btnCorrect = document.getElementById('btn-correct-last');
+    if (state.history.length > 0) btnCorrect.classList.remove('hidden');
+    else btnCorrect.classList.add('hidden');
+    renderSpecialBanner();
+    renderSessionDIndicator();
 }
 
-function estimateSessionDuration(sType) {
+/* ── RETOUR PAGE SÉANCE (sans effacer le draft) ── */
+function backToSessionHome() {
+    document.getElementById('workout-active').classList.add('hidden');
+    document.getElementById('workout-home').classList.remove('hidden');
+    // Mettre à jour la bannière et indicateurs
+    const sType = state.cycle.nextSession;
+    document.getElementById('cycle-badge').innerText = `Cycle ${state.cycle.currentCycle} · Semaine ${state.cycle.currentWeek}`;
+    document.getElementById('next-session-name').innerText = sType;
+    document.getElementById('next-session-desc').innerText = SESSIONS[sType].desc;
+    document.getElementById('estimated-time').innerText = '~' + estimateSessionDuration(sType) + ' min estimées';
+    const btnCorrect = document.getElementById('btn-correct-last');
+    if (state.history.length > 0) btnCorrect.classList.remove('hidden');
+    else btnCorrect.classList.add('hidden');
+    renderSpecialBanner();
+    renderSessionDIndicator();
+    lucide.createIcons();
+}
+
+
     const base = { A: 75, B: 80, C: 85, D: 55 };
     return base[sType] || 75;
 }
@@ -792,12 +801,14 @@ function confirmSkipDeload() {
 /* ── DÉMARRAGE SÉANCE ── */
 function startSession(type) {
     const sType = (type === 'next') ? state.cycle.nextSession : type;
-    if (state.sessionDraft) {
-        openDialog('Séance en cours', 'Vous avez une séance en cours. Voulez-vous la reprendre ou l\'abandonner ?', 'alert-circle',
-            () => { renderWorkoutTab(); }, 'Reprendre',
-            () => { state.sessionDraft = null; save(); startSession(type); }, 'Abandonner');
+    // Si un draft existe pour ce même type de séance, on le reprend directement
+    if (state.sessionDraft && state.sessionDraft.type === sType) {
+        document.getElementById('workout-home').classList.add('hidden');
+        document.getElementById('workout-active').classList.remove('hidden');
+        renderActiveSession();
         return;
     }
+    // Sinon, on écrase silencieusement (nouvelle séance ou type différent)
     const config  = SESSIONS[sType];
     const week    = state.cycle.currentWeek;
     const isTest  = (sType !== 'D') && (state.cycle.testChoice === 'test');
@@ -832,7 +843,10 @@ function startSession(type) {
 
     state.sessionDraft = { type: sType, week, cycle: state.cycle.currentCycle, date: Date.now(), isDeload: isDload, isTest, exercises };
     save();
-    router('workout');
+    document.getElementById('workout-home').classList.add('hidden');
+    document.getElementById('workout-active').classList.remove('hidden');
+    renderActiveSession();
+    lucide.createIcons();
 }
 
 /* ── RENDU SÉANCE ACTIVE ── */
@@ -855,7 +869,7 @@ function renderActiveSession() {
         else if (ex.type === 'ss' && ex.subSets) quickInfo = `<span class="text-[11px] font-bold text-slate-500">${ex.rounds} tours</span>`;
         let isTestBadge = ex.isTest ? '<span class="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-[9px] font-black uppercase">TEST 1RM</span>' : '';
 
-        div.className = `ex-card border-2 bg-white rounded-[2rem] p-5 ${statusClass}`;
+        div.className = `ex-card border-2 bg-white rounded-[2rem] p-5 ${statusClass} cursor-pointer`;
         div.innerHTML = `
             <div class="flex items-start justify-between mb-3">
                 <div class="flex-1 pr-3">
@@ -868,12 +882,11 @@ function renderActiveSession() {
                 </div>
                 <i data-lucide="${icon}" class="w-6 h-6 shrink-0 ${iconColor}"></i>
             </div>
-            <div class="flex items-center justify-between pt-3 border-t border-slate-100">
-                <button onclick="openExModal(${idx})" class="text-[10px] font-black uppercase tracking-widest text-indigo-600 tap py-1">
-                    ${ex.completed ? '✏️ Modifier' : 'Ouvrir & saisir'}
-                </button>
-                ${!ex.completed && !ex.skipped ? `<button onclick="skipExercise(${idx})" class="text-[10px] font-bold text-slate-300 tap py-1">Passer →</button>` : ''}
-            </div>`;
+            ${!ex.completed && !ex.skipped ? `
+            <div class="flex justify-end pt-3 border-t border-slate-100">
+                <button onclick="event.stopPropagation(); skipExercise(${idx})" class="text-[10px] font-bold text-slate-300 tap py-1">Passer →</button>
+            </div>` : ''}`;
+        div.addEventListener('click', () => openExModal(idx));
         list.appendChild(div);
     });
     checkSessionCanFinish();
@@ -975,16 +988,16 @@ function openExModal(idx) {
     if (ex.type === 'h' || ex.type === 'a') {
         const sets = getLastPerfRange(ex.id);
         if (sets) {
-            lastPerfEl.className = 'mt-2 last-perf-block text-[11px] font-medium text-white/80';
-            lastPerfEl.innerHTML = `<span class="font-black">Dernière fois :</span> ${formatSetsPerf(sets)}`;
+            lastPerfEl.className = 'mt-2 last-perf-block text-[11px] font-medium text-slate-600';
+            lastPerfEl.innerHTML = `<span class="font-black text-slate-800">Dernière fois :</span> ${formatSetsPerf(sets)}`;
         }
     } else if (ex.type === 'c' || ex.type === 'p') {
         const targetPerSet = ex.sets && ex.sets[0] ? ex.sets[0].repsTarget : null;
         if (targetPerSet !== null) {
             const sets = getLastPerfFixed(ex.id, targetPerSet);
             if (sets) {
-                lastPerfEl.className = 'mt-2 last-perf-block text-[11px] font-medium text-white/80';
-                lastPerfEl.innerHTML = `<span class="font-black">Dernière fois (×${targetPerSet}) :</span> ${formatSetsPerf(sets)}`;
+                lastPerfEl.className = 'mt-2 last-perf-block text-[11px] font-medium text-slate-600';
+                lastPerfEl.innerHTML = `<span class="font-black text-slate-800">Dernière fois (×${targetPerSet}) :</span> ${formatSetsPerf(sets)}`;
             }
         }
     }
@@ -1194,6 +1207,20 @@ function validateExercise() {
     const ex = state.sessionDraft.exercises[currentExIdx];
     if (ex.type === 'warmup') { closeExModal(); return; }
     if (ex.type === 'p') ex.techniqueOk = document.getElementById('velocity-check').checked;
+
+    // MOD 1 : valeur préremplie = saisie si non modifiée
+    if (ex.type === 'ss') {
+        ex.exIds.forEach((subId, subIdx) => {
+            ex.subSets[subIdx].forEach(s => {
+                if (s.repsReal === null || s.repsReal === undefined) s.repsReal = s.repsTarget;
+            });
+        });
+    } else if (ex.sets) {
+        ex.sets.forEach(s => {
+            if (s.repsReal === null || s.repsReal === undefined) s.repsReal = s.repsTarget;
+        });
+    }
+
     ex.completed = true;
     ex.skipped   = false;
     save();
@@ -1343,6 +1370,23 @@ function correctLastSession() {
 
 /* ── TIMER ── */
 function startTimer(seconds, nextLabel, exLabel) {
+    // Tenter d'ouvrir la minuterie native Android
+    const intentUrl = `intent://#Intent;action=android.intent.action.SET_TIMER;S.android.intent.extra.alarm.LENGTH=${seconds};S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent('Repos terminé')};S.android.intent.extra.alarm.SKIP_UI=false;end`;
+    const fallbackUrl = `clockwork://timer?duration=${seconds}`;
+
+    // Détecter Android
+    const isAndroid = /android/i.test(navigator.userAgent);
+    if (isAndroid) {
+        try {
+            window.location.href = intentUrl;
+            // Programmer quand même une notification web en secours
+            scheduleNotif(seconds, '⏱ Repos terminé !', `Prochaine série : ${exLabel || nextLabel || '—'}`);
+            toast(`⏱ Minuterie ${seconds}s lancée`);
+            return;
+        } catch(e) {}
+    }
+
+    // Fallback : timer in-app (desktop / iOS)
     if (timerInterval) clearInterval(timerInterval);
     timerLeft  = seconds;
     timerTotal = seconds;
@@ -1351,10 +1395,7 @@ function startTimer(seconds, nextLabel, exLabel) {
     document.getElementById('timer-next-name').innerText  = exLabel  || '—';
     document.getElementById('modal-timer').classList.remove('hidden');
     updateTimerUI();
-
-    // Programmer la notification système
     scheduleNotif(seconds, '⏱ Repos terminé !', `Prochaine série : ${exLabel || nextLabel || '—'}`);
-
     timerInterval = setInterval(() => {
         timerLeft--;
         if (timerLeft <= 0) {
@@ -1418,71 +1459,133 @@ function renderStats() {
         state.cycle.testChoice === 'test' ? 'Test en cours' : `Cycle ${state.cycle.currentCycle + cyclesLeft}`;
 }
 
+const CHART_EX_CONFIG = [
+    { id: 'back_squat',        color: '#4f46e5', label: 'Back Squat' },
+    { id: 'deadlift',          color: '#ef4444', label: 'Deadlift' },
+    { id: 'bench_press',       color: '#f59e0b', label: 'Bench Press' },
+    { id: 'hang_power_clean',  color: '#10b981', label: 'H.P. Clean' },
+    { id: 'hang_power_snatch', color: '#8b5cf6', label: 'H.P. Snatch' },
+];
+
+// Tracks which datasets are visible
+let chartVisibility = {};
+CHART_EX_CONFIG.forEach(ex => { chartVisibility[ex.id] = true; });
+
 function renderChartExSelector() {
-    const sel = document.getElementById('chart-ex-select');
-    sel.innerHTML = ''; // toujours re-remplir pour s'assurer que c'est à jour
-    Object.keys(state.orm).forEach(k => {
-        const opt = document.createElement('option');
-        opt.value = k; opt.innerText = exName(k);
-        sel.appendChild(opt);
-    });
+    // No longer needed - multi-curve mode, no selector
 }
 
 function renderProgressChart() {
-    const exId = document.getElementById('chart-ex-select').value || Object.keys(state.orm)[0];
     const periodDays = parseInt(document.getElementById('chart-period-select').value);
-    const cutoff = Date.now() - periodDays * 24 * 3600 * 1000;
+    const cutoff = periodDays === 9999 ? 0 : Date.now() - periodDays * 24 * 3600 * 1000;
 
-    const estimated = [];
-    const tested    = [];
+    // Build datasets for each exercise
+    const datasets = [];
+    CHART_EX_CONFIG.forEach(cfg => {
+        const color = cfg.color;
+        const estimated = [];
+        const tested    = [];
 
-    state.history.filter(h => h.date >= cutoff).forEach(h => {
-        const ex = h.exercises.find(e => e.id === exId && !e.skipped);
-        if (!ex) return;
-        const d = new Date(h.date).toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
-        if (ex.sets && ex.sets.length) {
-            const validSets = ex.sets.filter(s => s.repsReal && s.repsReal > 0);
-            if (validSets.length) {
-                const best = validSets.reduce((b, s) => e1RM(s.weight, s.repsReal) > e1RM(b.weight, b.repsReal) ? s : b);
-                estimated.push({ x: d, y: parseFloat(e1RM(best.weight, best.repsReal).toFixed(1)) });
+        state.history.filter(h => h.date >= cutoff).forEach(h => {
+            const ex = h.exercises.find(e => e.id === cfg.id && !e.skipped);
+            if (!ex) return;
+            const d = new Date(h.date).toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
+            if (ex.sets && ex.sets.length) {
+                const validSets = ex.sets.filter(s => s.repsReal && s.repsReal > 0);
+                if (validSets.length) {
+                    const best = validSets.reduce((b, s) => e1RM(s.weight, s.repsReal) > e1RM(b.weight, b.repsReal) ? s : b);
+                    estimated.push({ x: d, y: parseFloat(e1RM(best.weight, best.repsReal).toFixed(1)) });
+                }
             }
-        }
-        if (ex.isTest && ex.testAttempts) {
-            const lastOk = [...ex.testAttempts].reverse().find(a => a && a.success);
-            if (lastOk) tested.push({ x: d, y: lastOk.weight });
-        }
-    });
+            if (ex.isTest && ex.testAttempts) {
+                const lastOk = [...ex.testAttempts].reverse().find(a => a && a.success);
+                if (lastOk) tested.push({ x: d, y: lastOk.weight });
+            }
+        });
 
-    Object.entries(state.ormLastUpdated || {}).forEach(([id, ts]) => {
-        if (id === exId && ts >= cutoff) {
-            const d = new Date(ts).toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
-            tested.push({ x: d, y: state.orm[id] });
+        Object.entries(state.ormLastUpdated || {}).forEach(([id, ts]) => {
+            if (id === cfg.id && ts >= cutoff) {
+                const d = new Date(ts).toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
+                tested.push({ x: d, y: state.orm[id] });
+            }
+        });
+
+        const hidden = !chartVisibility[cfg.id];
+        if (estimated.length) {
+            datasets.push({
+                label: cfg.label + ' (estimé)',
+                data: estimated,
+                borderColor: color,
+                backgroundColor: color + '14',
+                fill: false,
+                tension: 0.4,
+                pointRadius: 3,
+                borderWidth: 2,
+                hidden,
+                _exId: cfg.id,
+                _kind: 'estimated'
+            });
+        }
+        if (tested.length) {
+            datasets.push({
+                label: cfg.label + ' (test)',
+                data: tested,
+                borderColor: color,
+                backgroundColor: color,
+                fill: false,
+                showLine: false,
+                pointRadius: 7,
+                pointStyle: 'star',
+                hidden,
+                _exId: cfg.id,
+                _kind: 'tested'
+            });
         }
     });
 
     const ctx = document.getElementById('chart-progress').getContext('2d');
     if (progressChart) { progressChart.destroy(); progressChart = null; }
 
-    if (!estimated.length && !tested.length) {
+    if (!datasets.length || datasets.every(d => !d.data.length)) {
         ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
         ctx.fillStyle = '#94a3b8'; ctx.font = '12px Inter'; ctx.textAlign = 'center';
-        ctx.fillText('Aucune donnée pour cet exercice', ctx.canvas.width / 2, 80);
+        ctx.fillText('Aucune donnée enregistrée', ctx.canvas.width / 2, 80);
+        renderChartLegend();
         return;
     }
 
     progressChart = new Chart(ctx, {
         type: 'line',
-        data: {
-            datasets: [
-                { label: '1RM Estimé', data: estimated, borderColor: '#4f46e5', backgroundColor: 'rgba(79,70,229,0.08)', fill: true, tension: 0.4, pointRadius: 4, borderWidth: 2 },
-                { label: '1RM Réel (test)', data: tested, borderColor: '#f59e0b', backgroundColor: '#f59e0b', fill: false, showLine: false, pointRadius: 7, pointStyle: 'star' }
-            ]
-        },
+        data: { datasets },
         options: {
             plugins: { legend: { display: false } },
             scales: { x: { type: 'category', grid: { display: false } }, y: { beginAtZero: false, grid: { color: '#f1f5f9' } } },
             responsive: true, maintainAspectRatio: true
         }
+    });
+    renderChartLegend();
+}
+
+function renderChartLegend() {
+    const container = document.getElementById('chart-legend');
+    if (!container) return;
+    container.innerHTML = '';
+    CHART_EX_CONFIG.forEach(cfg => {
+        const active = chartVisibility[cfg.id];
+        const btn = document.createElement('button');
+        btn.className = `flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black border-2 tap transition-all ${
+            active
+                ? 'text-white border-transparent'
+                : 'bg-white text-slate-400 border-slate-200'
+        }`;
+        if (active) btn.style.backgroundColor = cfg.color;
+        btn.style.borderColor = active ? cfg.color : '';
+        btn.innerHTML = `<span class="w-2 h-2 rounded-full inline-block" style="background:${cfg.color}"></span>${cfg.label}`;
+        btn.addEventListener('click', () => {
+            chartVisibility[cfg.id] = !chartVisibility[cfg.id];
+            renderProgressChart();
+        });
+        container.appendChild(btn);
     });
 }
 
@@ -1756,34 +1859,72 @@ function updateSyncUI(status) {
 }
 
 async function pushToCloud() {
-    if (!state.syncKey) { toast('Aucun ID de sync configuré'); return; }
+    if (!state.syncKey) return;
     updateSyncUI('syncing');
     try {
         const res = await fetch(API_BASE + state.syncKey, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(state) });
         updateSyncUI(res.ok ? 'ok' : 'error');
-        if (res.ok) toast('✅ Données envoyées au Cloud');
-    } catch(e) { updateSyncUI('error'); toast('❌ Erreur réseau'); }
+    } catch(e) { updateSyncUI('error'); }
 }
 
-async function pullFromCloud() {
-    if (!state.syncKey) { toast('Aucun ID de sync configuré'); return; }
-    updateSyncUI('syncing');
-    try {
-        const res = await fetch(API_BASE + state.syncKey + '?t=' + Date.now());
-        if (!res.ok) { updateSyncUI('error'); return; }
-        const cloudState = await res.json();
-        if (!cloudState || !cloudState.lastUpdated) { updateSyncUI('error'); toast('Cloud vide ou invalide'); return; }
-        openDialog('Récupérer depuis le Cloud ?', `Les données Cloud (${new Date(cloudState.lastUpdated).toLocaleString('fr-FR')}) remplaceront vos données locales.`, 'cloud', () => {
-            state = Object.assign(deepClone(INITIAL_STATE), cloudState);
-            save(); router('workout'); toast('✅ Données Cloud restaurées');
-        });
-    } catch(e) { updateSyncUI('error'); toast('❌ Erreur réseau'); }
-}
-
-function saveSyncKey() {
+async function applySyncKey() {
     const key = document.getElementById('sync-key-input').value.trim();
     if (!key) { toast('ID vide'); return; }
-    state.syncKey = key; save(); toast('✅ ID enregistré');
+    state.syncKey = key;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    updateSyncUI('syncing');
+    try {
+        const res = await fetch(API_BASE + key + '?t=' + Date.now());
+        if (!res.ok) { updateSyncUI('error'); toast('❌ Impossible de contacter le cloud'); return; }
+        const cloudState = await res.json();
+        if (!cloudState || !cloudState.lastUpdated) {
+            // Cloud vide → pousser les données locales
+            await pushToCloud();
+            toast('✅ ID enregistré · Données locales envoyées vers le cloud');
+        } else {
+            // Cloud prioritaire
+            state = Object.assign(deepClone(INITIAL_STATE), cloudState);
+            state.syncKey = key;
+            migrateState();
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            router('workout');
+            updateSyncUI('ok');
+            toast('✅ ID enregistré · Données cloud récupérées');
+        }
+    } catch(e) { updateSyncUI('error'); toast('❌ Erreur réseau'); }
+}
+
+async function autoSyncFromCloud() {
+    if (!state.syncKey || !navigator.onLine || document.hidden) return;
+    try {
+        const res = await fetch(API_BASE + state.syncKey + '?t=' + Date.now());
+        if (!res.ok) return;
+        const cloudState = await res.json();
+        if (cloudState && cloudState.lastUpdated && cloudState.lastUpdated > state.lastUpdated) {
+            state = Object.assign(deepClone(INITIAL_STATE), cloudState);
+            migrateState();
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            router('workout');
+            updateSyncUI('ok');
+            toast('☁️ Données synchronisées');
+        } else {
+            updateSyncUI('ok');
+        }
+    } catch(e) { updateSyncUI('error'); }
+}
+
+function confirmResetCloud() {
+    openDialog('⚠️ Réinitialiser le cloud ?', 'Toutes les données cloud seront remplacées par l\'état initial par défaut. Vos données locales ne sont pas affectées.', 'trash-2', () => {
+        openDialog('Dernière confirmation', 'Êtes-vous certain ? Les données cloud seront perdues définitivement.', 'alert-triangle', async () => {
+            if (!state.syncKey) { toast('Aucun ID configuré'); return; }
+            updateSyncUI('syncing');
+            try {
+                const res = await fetch(API_BASE + state.syncKey, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(INITIAL_STATE) });
+                if (res.ok) { updateSyncUI('ok'); toast('✅ Cloud réinitialisé'); }
+                else { updateSyncUI('error'); toast('❌ Erreur lors de la réinitialisation'); }
+            } catch(e) { updateSyncUI('error'); toast('❌ Erreur réseau'); }
+        }, 'Oui, réinitialiser');
+    }, 'Réinitialiser');
 }
 
 function openSyncHelp() {
@@ -1834,15 +1975,6 @@ function guideHTML() {
         </section>`;
 }
 
-/* ── RESET ── */
-function confirmResetAll() {
-    openDialog('⚠️ Supprimer toutes les données ?', 'ATTENTION : tout l\'historique, les progressions et les paramètres seront effacés définitivement.', 'trash-2', () => {
-        openDialog('Dernière confirmation', 'Êtes-vous absolument certain ? Toutes vos données seront perdues.', 'alert-triangle', () => {
-            localStorage.removeItem(STORAGE_KEY); location.reload();
-        }, 'Oui, tout supprimer');
-    }, 'Supprimer');
-}
-
 /* ── PERSISTANCE ── */
 function save() {
     state.lastUpdated = Date.now();
@@ -1888,27 +2020,19 @@ window.addEventListener('load', () => {
     } catch(e) { console.warn('Erreur chargement state :', e); }
 
     migrateState();
-
-    // Demander permission notifications
     requestNotifPermission();
-
     router('workout');
-    if (state.sessionDraft) toast('📋 Séance en cours — reprise automatique');
+    if (state.sessionDraft) toast('📋 Séance en cours — reprise disponible');
 
+    // Sync cloud au démarrage (cloud prioritaire)
     if (state.syncKey && navigator.onLine) {
-        setTimeout(() => {
-            fetch(API_BASE + state.syncKey + '?t=' + Date.now())
-                .then(r => r.ok ? r.json() : null)
-                .then(cloudState => {
-                    if (cloudState && cloudState.lastUpdated && cloudState.lastUpdated > state.lastUpdated) {
-                        state = Object.assign(deepClone(INITIAL_STATE), cloudState);
-                        migrateState();
-                        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-                        router('workout'); updateSyncUI('ok'); toast('☁️ Données synchronisées');
-                    } else { updateSyncUI('ok'); }
-                }).catch(() => updateSyncUI('error'));
-        }, 800);
+        setTimeout(() => autoSyncFromCloud(), 800);
     }
+
+    // Vérification cloud toutes les 20 secondes (premier plan uniquement)
+    setInterval(() => {
+        if (!document.hidden) autoSyncFromCloud();
+    }, 20000);
 });
 
 document.addEventListener('visibilitychange', () => {
