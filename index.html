@@ -251,10 +251,8 @@
                     <label class="text-[9px] font-black uppercase opacity-50 block mb-1.5">ID npoint.io</label>
                     <input type="text" id="sync-key-input" placeholder="Collez votre ID ici..."
                         class="w-full bg-white/10 border border-white/10 rounded-2xl px-4 py-3 text-sm font-bold text-white placeholder:text-white/30 outline-none focus:border-indigo-400">
-                    <button onclick="openSyncHelp()" class="text-[10px] font-bold text-indigo-400 mt-1.5 underline">Comment obtenir un ID npoint.io ?</button>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <button onclick="applySyncKey()" class="bg-indigo-600 py-3 rounded-2xl text-[10px] font-black uppercase tap col-span-2">Enregistrer et synchroniser</button>
+                    <p class="text-[9px] font-medium text-white/40 mt-1.5">La synchronisation démarre automatiquement à la saisie.</p>
+                    <button onclick="openSyncHelp()" class="text-[10px] font-bold text-indigo-400 mt-1 underline">Comment obtenir un ID npoint.io ?</button>
                 </div>
             </div>
         </div>
@@ -938,10 +936,15 @@ function getLastPerfFixed(exId, repsTargetPerSet) {
 
 function formatSetsPerf(sets) {
     if (!sets || !sets.length) return '';
-    return sets.map((s, i) => {
+    const allSameWeight = sets.every(s => s.weight === sets[0].weight);
+    if (allSameWeight && sets[0].weight !== undefined) {
+        const reps = sets.map(s => (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : '—').join(',');
+        return `${sets[0].weight}kg × ${reps}`;
+    }
+    return sets.map(s => {
         const r = (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : '—';
-        return `S${i+1} : ${s.weight !== undefined ? s.weight + 'kg' : ''} × ${r}`;
-    }).join(' · ');
+        return s.weight !== undefined ? `${s.weight}×${r}` : `${r}`;
+    }).join(' - ');
 }
 
 /* ── MODAL EXERCICE ── */
@@ -1189,6 +1192,46 @@ function checkDoubleProgression(ex) {
     }
 }
 
+/* Traite la double progression pour chaque sous-exercice d'un superset, séquentiellement */
+function checkDoubleProgressionSS(ex, subIdx) {
+    if (subIdx >= ex.exIds.length) { closeExModal(); return; }
+    const subId = ex.exIds[subIdx];
+    const cfg = state.accessories[subId];
+    if (!cfg) { checkDoubleProgressionSS(ex, subIdx + 1); return; }
+    // Construire un faux ex compatible avec checkDoubleProgression
+    const fakeEx = {
+        type: 'a',
+        id: subId,
+        sets: ex.subSets[subIdx].map(s => ({ repsReal: s.repsReal, repsTarget: s.repsTarget, weight: s.weight }))
+    };
+    const rt = cfg.repTarget !== undefined ? cfg.repTarget : cfg.repMin;
+    const allReached = fakeEx.sets.every(s => s.repsReal !== null && s.repsReal !== undefined && s.repsReal >= rt);
+    if (!allReached) { checkDoubleProgressionSS(ex, subIdx + 1); return; }
+    // Même logique que checkDoubleProgression mais avec callback pour continuer au suivant
+    if (rt < cfg.repMax) {
+        openDialog(
+            '🎯 Objectif atteint !',
+            `${exName(subId)} — tous les tours à ${rt} reps. Passer à ${rt + 1} reps cible la prochaine fois ?`,
+            'trending-up',
+            () => { cfg.repTarget = rt + 1; save(); toast(`✅ Cible → ${rt + 1} reps pour ${exName(subId)}`); checkDoubleProgressionSS(ex, subIdx + 1); },
+            'Oui, progresser',
+            () => { checkDoubleProgressionSS(ex, subIdx + 1); },
+            'Non, garder'
+        );
+    } else {
+        const newWeight = r025(cfg.weight + cfg.inc);
+        openDialog(
+            '🏆 Plafond atteint !',
+            `${exName(subId)} — tous les tours à ${rt} reps (max). Passer à ${newWeight} kg et revenir à ${cfg.repMin} reps ?`,
+            'trending-up',
+            () => { cfg.weight = newWeight; cfg.repTarget = cfg.repMin; save(); toast(`✅ ${exName(subId)} → ${newWeight} kg · ${cfg.repMin} reps`); checkDoubleProgressionSS(ex, subIdx + 1); },
+            'Oui, progresser',
+            () => { checkDoubleProgressionSS(ex, subIdx + 1); },
+            'Non, garder'
+        );
+    }
+}
+
 function validateExercise() {
     const ex = state.sessionDraft.exercises[currentExIdx];
     if (ex.type === 'warmup') { closeExModal(); return; }
@@ -1204,9 +1247,14 @@ function validateExercise() {
     ex.completed = true;
     ex.skipped   = false;
     save();
-    // Vérifier double progression AVANT de fermer
+    // Double progression : accessoires simples
     if (ex.type === 'h' || ex.type === 'a') {
         checkDoubleProgression(ex);
+    }
+    // Double progression : chaque sous-exercice d'un superset
+    if (ex.type === 'ss') {
+        checkDoubleProgressionSS(ex, 0);
+        return;
     }
     closeExModal();
 }
@@ -1350,12 +1398,15 @@ function correctLastSession() {
 
 /* ── TIMER ── */
 function startTimer(seconds, nextLabel, exLabel) {
-    // Sur Android : ouvrir la minuterie native pré-remplie
+    // Sur Android : créer une alarme native à l'heure cible (SET_ALARM est universel sur Android)
     if (/android/i.test(navigator.userAgent)) {
-        const intentUrl = `intent://#Intent;action=android.intent.action.SET_TIMER;S.android.intent.extra.alarm.LENGTH=${seconds};S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent('Repos terminé')};S.android.intent.extra.alarm.SKIP_UI=false;end`;
+        const target = new Date(Date.now() + seconds * 1000);
+        const h = target.getHours();
+        const m = target.getMinutes();
+        const msg = encodeURIComponent('Repos terminé — ' + (exLabel || nextLabel || 'Prochaine série'));
+        const intentUrl = `intent://#Intent;action=android.intent.action.SET_ALARM;S.android.intent.extra.alarm.EXTRA_HOUR=${h};S.android.intent.extra.alarm.EXTRA_MINUTES=${m};S.android.intent.extra.alarm.MESSAGE=${msg};S.android.intent.extra.alarm.SKIP_UI=false;end`;
         window.location.href = intentUrl;
-        scheduleNotif(seconds, '⏱ Repos terminé !', `Prochaine série : ${exLabel || nextLabel || '—'}`);
-        toast(`⏱ Minuterie ${seconds}s lancée`);
+        toast(`⏱ Alarme réglée à ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
         return;
     }
     // Fallback : timer in-app (desktop / iOS)
@@ -1608,8 +1659,18 @@ function renderSettingsTab() {
     renderExerciseParamsList();
     renderPlateSettings();
     renderCycleStatus();
-    document.getElementById('sync-key-input').value = state.syncKey || '';
+    const syncInput = document.getElementById('sync-key-input');
+    syncInput.value = state.syncKey || '';
     document.getElementById('bar-weight-input').value = state.barWeight;
+    // Debounce : déclenche applySyncKey 1500ms après la dernière frappe
+    syncInput.oninput = null;
+    let syncDebounceTimer = null;
+    syncInput.addEventListener('input', () => {
+        clearTimeout(syncDebounceTimer);
+        const val = syncInput.value.trim();
+        if (!val) return;
+        syncDebounceTimer = setTimeout(() => applySyncKey(), 1500);
+    });
 }
 
 function renderOrmList() {
@@ -1759,13 +1820,22 @@ function applyCycleManualEdits() {
 }
 
 function confirmRestartCycle() {
-    openDialog('Redémarrer le cycle ?', 'Le cycle redémarrera à la Semaine 1. Votre historique et vos 1RM sont conservés.', 'refresh-cw', () => {
-        openDialog('Confirmer (2/2)', 'Cette action est irréversible pour la position dans le cycle. Confirmer ?', 'alert-triangle', () => {
-            state.cycle.currentWeek = 1; state.cycle.nextSession = 'A'; state.cycle.testChoice = null;
-            state.cycle.isDeload = false; state.cycle.deloadRemaining = 0;
-            save(); renderCycleStatus(); toast('🔄 Cycle redémarré');
-        });
-    });
+    openDialog(
+        'Redémarrer le cycle ?',
+        'Le cycle redémarrera à la Semaine 1, Séance A. Votre historique et vos 1RM sont conservés. Cette action est irréversible pour la position dans le cycle.',
+        'refresh-cw',
+        () => {
+            state.cycle.currentWeek  = 1;
+            state.cycle.nextSession  = 'A';
+            state.cycle.testChoice   = null;
+            state.cycle.isDeload     = false;
+            state.cycle.deloadRemaining = 0;
+            save();
+            renderCycleStatus();
+            toast('🔄 Cycle redémarré — Semaine 1, Séance A');
+        },
+        'Oui, redémarrer'
+    );
 }
 
 /* ── SYNC CLOUD ── */
@@ -1846,14 +1916,18 @@ function openDialog(title, body, icon, okCb, okLabel, cancelCb, cancelLabel) {
     document.getElementById('dialog-ok').innerText = okLabel || 'Confirmer';
     const cancelBtn = document.getElementById('dialog-cancel');
     cancelBtn.innerText = cancelLabel || 'Annuler';
-    cancelBtn.onclick = () => { closeDialog(); if (cancelCb) cancelCb(); };
+    cancelBtn.onclick = () => { const cb = cancelCb; closeDialog(); if (cb) cb(); };
     dialogCallback = okCb;
     document.getElementById('modal-dialog').classList.remove('hidden');
     lucide.createIcons();
 }
 
 function closeDialog() { document.getElementById('modal-dialog').classList.add('hidden'); dialogCallback = null; }
-document.getElementById('dialog-ok').addEventListener('click', () => { if (dialogCallback) dialogCallback(); closeDialog(); });
+document.getElementById('dialog-ok').addEventListener('click', () => {
+    const cb = dialogCallback;
+    closeDialog(); // fermer D'ABORD, puis exécuter le callback
+    if (cb) cb();  // le callback peut ainsi ouvrir un nouveau dialog sans être écrasé
+});
 
 /* ── GUIDE ── */
 function toggleGuide() {
@@ -1884,17 +1958,23 @@ function guideHTML() {
 
 /* ── RESET CLOUD ── */
 function confirmResetCloud() {
-    openDialog('⚠️ Réinitialiser le cloud ?', 'Les données cloud seront remplacées par les valeurs par défaut. Vos données locales ne sont pas affectées.', 'trash-2', () => {
-        openDialog('Dernière confirmation', 'Êtes-vous certain ? Les données cloud seront perdues définitivement.', 'alert-triangle', async () => {
-            if (!state.syncKey) { toast('Aucun ID configuré'); return; }
-            updateSyncUI('syncing');
-            try {
-                const res = await fetch(API_BASE + state.syncKey, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(INITIAL_STATE) });
-                if (res.ok) { updateSyncUI('ok'); toast('✅ Cloud réinitialisé'); }
-                else { updateSyncUI('error'); toast('❌ Erreur lors de la réinitialisation'); }
-            } catch(e) { updateSyncUI('error'); toast('❌ Erreur réseau'); }
-        }, 'Oui, réinitialiser');
-    }, 'Réinitialiser');
+    openDialog(
+        '⚠️ Réinitialiser les progressions ?',
+        'L\'historique des séances sera effacé et les répétitions cibles remises au minimum pour tous les exercices. Appliqué en local ET sur le cloud.',
+        'trash-2',
+        () => {
+            if (!state.syncKey) { toast('Aucun ID cloud configuré'); return; }
+            // Effacer l'historique
+            state.history = [];
+            // Remettre repTarget = repMin pour tous les exercices avec range
+            Object.values(state.heavySecondary).forEach(cfg => { cfg.repTarget = cfg.repMin; });
+            Object.values(state.accessories).forEach(cfg => { cfg.repTarget = cfg.repMin; });
+            // Sauvegarder en local et pousser vers le cloud
+            save();
+            toast('✅ Progressions réinitialisées — local et cloud mis à jour');
+        },
+        'Oui, réinitialiser'
+    );
 }
 
 /* ── RETOUR VUE HOME SÉANCE (conserve le draft) ── */
