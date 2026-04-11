@@ -1409,14 +1409,28 @@ function correctLastSession() {
 
 /* ── TIMER ── */
 function startTimer(seconds, nextLabel, exLabel) {
-    // Sur Android : ouvrir la minuterie native via intent SET_TIMER
+    // Sur Android : intent générique SET_TIMER sans package (compatible tous constructeurs)
     if (/android/i.test(navigator.userAgent)) {
-        const intentUrl = `intent:#Intent;action=android.intent.action.SET_TIMER;S.android.intent.extra.alarm.LENGTH=${seconds};B.android.intent.extra.alarm.SKIP_UI=true;package=com.google.android.deskclock;end`;
+        const intentUrl = `intent://placeholder#Intent;action=android.intent.action.SET_TIMER;S.android.intent.extra.alarm.LENGTH=${seconds};S.android.intent.extra.alarm.SKIP_UI=true;end`;
         window.location.href = intentUrl;
-        toast(`⏱ Minuterie ${seconds}s — ouvrez l'Horloge si elle ne s'est pas lancée`);
+        // Après 600ms : si l'app est toujours visible, tenter le schème timers://
+        setTimeout(() => {
+            if (document.hidden) return; // l'intent a fonctionné, on est passé en arrière-plan
+            window.location.href = `timers://timer?duration=${seconds}`;
+            // Après 600ms supplémentaires : si toujours visible, fallback timer in-app
+            setTimeout(() => {
+                if (document.hidden) return;
+                _startTimerInApp(seconds, nextLabel, exLabel);
+                toast('⏱ Minuterie in-app (intent non supporté sur cet appareil)');
+            }, 600);
+        }, 600);
         return;
     }
-    // Fallback : timer in-app (desktop / iOS)
+    // Fallback direct : timer in-app (desktop / iOS)
+    _startTimerInApp(seconds, nextLabel, exLabel);
+}
+
+function _startTimerInApp(seconds, nextLabel, exLabel) {
     if (timerInterval) clearInterval(timerInterval);
     timerLeft  = seconds;
     timerTotal = seconds;
