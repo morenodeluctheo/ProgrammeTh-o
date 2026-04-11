@@ -132,11 +132,10 @@
             </div>
         </div>
         <div id="workout-active" class="hidden">
-            <div class="flex items-center gap-3 mb-4">
+            <div class="flex items-center mb-4">
                 <button onclick="backToSessionHome()" class="flex items-center gap-2 bg-white border-2 border-slate-100 px-4 py-2.5 rounded-2xl text-[10px] font-black uppercase text-slate-600 tap shadow-sm">
                     <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Retour
                 </button>
-                <div class="flex-1"></div>
             </div>
             <div id="active-exercises-list" class="space-y-3"></div>
         </div>
@@ -254,7 +253,9 @@
                         class="w-full bg-white/10 border border-white/10 rounded-2xl px-4 py-3 text-sm font-bold text-white placeholder:text-white/30 outline-none focus:border-indigo-400">
                     <button onclick="openSyncHelp()" class="text-[10px] font-bold text-indigo-400 mt-1.5 underline">Comment obtenir un ID npoint.io ?</button>
                 </div>
-                <button onclick="applySyncKey()" class="w-full bg-indigo-600 py-3 rounded-2xl text-[10px] font-black uppercase tap">Enregistrer et synchroniser</button>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="applySyncKey()" class="bg-indigo-600 py-3 rounded-2xl text-[10px] font-black uppercase tap col-span-2">Enregistrer et synchroniser</button>
+                </div>
             </div>
         </div>
         <div class="text-center pb-4">
@@ -700,50 +701,30 @@ function router(page) {
 }
 
 /* ── ONGLET SÉANCE ── */
-function renderWorkoutTab(showActive) {
+function renderWorkoutTab() {
     const home   = document.getElementById('workout-home');
     const active = document.getElementById('workout-active');
-    // Afficher la vue active si : on le demande explicitement OU si elle est déjà visible
-    if (state.sessionDraft && (showActive || !active.classList.contains('hidden'))) {
+    if (state.sessionDraft) {
         home.classList.add('hidden');
         active.classList.remove('hidden');
         renderActiveSession();
-        return;
+    } else {
+        home.classList.remove('hidden');
+        active.classList.add('hidden');
+        const sType = state.cycle.nextSession;
+        document.getElementById('cycle-badge').innerText = `Cycle ${state.cycle.currentCycle} · Semaine ${state.cycle.currentWeek}`;
+        document.getElementById('next-session-name').innerText = sType;
+        document.getElementById('next-session-desc').innerText = SESSIONS[sType].desc;
+        document.getElementById('estimated-time').innerText = '~' + estimateSessionDuration(sType) + ' min estimées';
+        const btnCorrect = document.getElementById('btn-correct-last');
+        if (state.history.length > 0) btnCorrect.classList.remove('hidden');
+        else btnCorrect.classList.add('hidden');
+        renderSpecialBanner();
+        renderSessionDIndicator();
     }
-    // Sinon : vue home (draft conservé en mémoire, accessible via Commencer)
-    home.classList.remove('hidden');
-    active.classList.add('hidden');
-    const sType = state.cycle.nextSession;
-    document.getElementById('cycle-badge').innerText = `Cycle ${state.cycle.currentCycle} · Semaine ${state.cycle.currentWeek}`;
-    document.getElementById('next-session-name').innerText = sType;
-    document.getElementById('next-session-desc').innerText = SESSIONS[sType].desc;
-    document.getElementById('estimated-time').innerText = '~' + estimateSessionDuration(sType) + ' min estimées';
-    const btnCorrect = document.getElementById('btn-correct-last');
-    if (state.history.length > 0) btnCorrect.classList.remove('hidden');
-    else btnCorrect.classList.add('hidden');
-    renderSpecialBanner();
-    renderSessionDIndicator();
 }
 
-/* ── RETOUR PAGE SÉANCE (sans effacer le draft) ── */
-function backToSessionHome() {
-    document.getElementById('workout-active').classList.add('hidden');
-    document.getElementById('workout-home').classList.remove('hidden');
-    // Mettre à jour la bannière et indicateurs
-    const sType = state.cycle.nextSession;
-    document.getElementById('cycle-badge').innerText = `Cycle ${state.cycle.currentCycle} · Semaine ${state.cycle.currentWeek}`;
-    document.getElementById('next-session-name').innerText = sType;
-    document.getElementById('next-session-desc').innerText = SESSIONS[sType].desc;
-    document.getElementById('estimated-time').innerText = '~' + estimateSessionDuration(sType) + ' min estimées';
-    const btnCorrect = document.getElementById('btn-correct-last');
-    if (state.history.length > 0) btnCorrect.classList.remove('hidden');
-    else btnCorrect.classList.add('hidden');
-    renderSpecialBanner();
-    renderSessionDIndicator();
-    lucide.createIcons();
-}
-
-
+function estimateSessionDuration(sType) {
     const base = { A: 75, B: 80, C: 85, D: 55 };
     return base[sType] || 75;
 }
@@ -808,11 +789,12 @@ function confirmSkipDeload() {
 /* ── DÉMARRAGE SÉANCE ── */
 function startSession(type) {
     const sType = (type === 'next') ? state.cycle.nextSession : type;
-    // Si un draft existe pour ce même type de séance, on le reprend directement
+    // Si un draft du même type existe, on le reprend directement sans recréer
     if (state.sessionDraft && state.sessionDraft.type === sType) {
         document.getElementById('workout-home').classList.add('hidden');
         document.getElementById('workout-active').classList.remove('hidden');
         renderActiveSession();
+        lucide.createIcons();
         return;
     }
     // Sinon, on écrase silencieusement (nouvelle séance ou type différent)
@@ -889,10 +871,7 @@ function renderActiveSession() {
                 </div>
                 <i data-lucide="${icon}" class="w-6 h-6 shrink-0 ${iconColor}"></i>
             </div>
-            ${!ex.completed && !ex.skipped ? `
-            <div class="flex justify-end pt-3 border-t border-slate-100">
-                <button onclick="event.stopPropagation(); skipExercise(${idx})" class="text-[10px] font-bold text-slate-300 tap py-1">Passer →</button>
-            </div>` : ''}`;
+            ${!ex.completed && !ex.skipped ? `<div class="flex justify-end pt-3 border-t border-slate-100"><button onclick="event.stopPropagation();skipExercise(${idx})" class="text-[10px] font-bold text-slate-300 tap py-1">Passer →</button></div>` : ''}`;
         div.addEventListener('click', () => openExModal(idx));
         list.appendChild(div);
     });
@@ -1214,20 +1193,14 @@ function validateExercise() {
     const ex = state.sessionDraft.exercises[currentExIdx];
     if (ex.type === 'warmup') { closeExModal(); return; }
     if (ex.type === 'p') ex.techniqueOk = document.getElementById('velocity-check').checked;
-
-    // MOD 1 : valeur préremplie = saisie si non modifiée
+    // Mod 1 : valeur préremplie considérée comme saisie si non modifiée
     if (ex.type === 'ss') {
         ex.exIds.forEach((subId, subIdx) => {
-            ex.subSets[subIdx].forEach(s => {
-                if (s.repsReal === null || s.repsReal === undefined) s.repsReal = s.repsTarget;
-            });
+            ex.subSets[subIdx].forEach(s => { if (s.repsReal === null || s.repsReal === undefined) s.repsReal = s.repsTarget; });
         });
     } else if (ex.sets) {
-        ex.sets.forEach(s => {
-            if (s.repsReal === null || s.repsReal === undefined) s.repsReal = s.repsTarget;
-        });
+        ex.sets.forEach(s => { if (s.repsReal === null || s.repsReal === undefined) s.repsReal = s.repsTarget; });
     }
-
     ex.completed = true;
     ex.skipped   = false;
     save();
@@ -1371,32 +1344,20 @@ function correctLastSession() {
         const last = state.history.pop();
         state.sessionDraft = last;
         save();
-        // Forcer l'affichage de la vue active
-        document.getElementById('workout-home').classList.add('hidden');
-        document.getElementById('workout-active').classList.remove('hidden');
-        renderActiveSession();
-        lucide.createIcons();
+        router('workout');
     });
 }
 
 /* ── TIMER ── */
 function startTimer(seconds, nextLabel, exLabel) {
-    // Tenter d'ouvrir la minuterie native Android
-    const intentUrl = `intent://#Intent;action=android.intent.action.SET_TIMER;S.android.intent.extra.alarm.LENGTH=${seconds};S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent('Repos terminé')};S.android.intent.extra.alarm.SKIP_UI=false;end`;
-    const fallbackUrl = `clockwork://timer?duration=${seconds}`;
-
-    // Détecter Android
-    const isAndroid = /android/i.test(navigator.userAgent);
-    if (isAndroid) {
-        try {
-            window.location.href = intentUrl;
-            // Programmer quand même une notification web en secours
-            scheduleNotif(seconds, '⏱ Repos terminé !', `Prochaine série : ${exLabel || nextLabel || '—'}`);
-            toast(`⏱ Minuterie ${seconds}s lancée`);
-            return;
-        } catch(e) {}
+    // Sur Android : ouvrir la minuterie native pré-remplie
+    if (/android/i.test(navigator.userAgent)) {
+        const intentUrl = `intent://#Intent;action=android.intent.action.SET_TIMER;S.android.intent.extra.alarm.LENGTH=${seconds};S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent('Repos terminé')};S.android.intent.extra.alarm.SKIP_UI=false;end`;
+        window.location.href = intentUrl;
+        scheduleNotif(seconds, '⏱ Repos terminé !', `Prochaine série : ${exLabel || nextLabel || '—'}`);
+        toast(`⏱ Minuterie ${seconds}s lancée`);
+        return;
     }
-
     // Fallback : timer in-app (desktop / iOS)
     if (timerInterval) clearInterval(timerInterval);
     timerLeft  = seconds;
@@ -1406,7 +1367,10 @@ function startTimer(seconds, nextLabel, exLabel) {
     document.getElementById('timer-next-name').innerText  = exLabel  || '—';
     document.getElementById('modal-timer').classList.remove('hidden');
     updateTimerUI();
+
+    // Programmer la notification système
     scheduleNotif(seconds, '⏱ Repos terminé !', `Prochaine série : ${exLabel || nextLabel || '—'}`);
+
     timerInterval = setInterval(() => {
         timerLeft--;
         if (timerLeft <= 0) {
@@ -1477,26 +1441,17 @@ const CHART_EX_CONFIG = [
     { id: 'hang_power_clean',  color: '#10b981', label: 'H.P. Clean' },
     { id: 'hang_power_snatch', color: '#8b5cf6', label: 'H.P. Snatch' },
 ];
-
-// Tracks which datasets are visible
 let chartVisibility = {};
 CHART_EX_CONFIG.forEach(ex => { chartVisibility[ex.id] = true; });
 
-function renderChartExSelector() {
-    // No longer needed - multi-curve mode, no selector
-}
+function renderChartExSelector() { /* remplacé par légende interactive */ }
 
 function renderProgressChart() {
     const periodDays = parseInt(document.getElementById('chart-period-select').value);
-    const cutoff = periodDays === 9999 ? 0 : Date.now() - periodDays * 24 * 3600 * 1000;
-
-    // Build datasets for each exercise
+    const cutoff = periodDays >= 9999 ? 0 : Date.now() - periodDays * 24 * 3600 * 1000;
     const datasets = [];
     CHART_EX_CONFIG.forEach(cfg => {
-        const color = cfg.color;
-        const estimated = [];
-        const tested    = [];
-
+        const estimated = [], tested = [];
         state.history.filter(h => h.date >= cutoff).forEach(h => {
             const ex = h.exercises.find(e => e.id === cfg.id && !e.skipped);
             if (!ex) return;
@@ -1513,66 +1468,27 @@ function renderProgressChart() {
                 if (lastOk) tested.push({ x: d, y: lastOk.weight });
             }
         });
-
         Object.entries(state.ormLastUpdated || {}).forEach(([id, ts]) => {
             if (id === cfg.id && ts >= cutoff) {
                 const d = new Date(ts).toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
                 tested.push({ x: d, y: state.orm[id] });
             }
         });
-
         const hidden = !chartVisibility[cfg.id];
-        if (estimated.length) {
-            datasets.push({
-                label: cfg.label + ' (estimé)',
-                data: estimated,
-                borderColor: color,
-                backgroundColor: color + '14',
-                fill: false,
-                tension: 0.4,
-                pointRadius: 3,
-                borderWidth: 2,
-                hidden,
-                _exId: cfg.id,
-                _kind: 'estimated'
-            });
-        }
-        if (tested.length) {
-            datasets.push({
-                label: cfg.label + ' (test)',
-                data: tested,
-                borderColor: color,
-                backgroundColor: color,
-                fill: false,
-                showLine: false,
-                pointRadius: 7,
-                pointStyle: 'star',
-                hidden,
-                _exId: cfg.id,
-                _kind: 'tested'
-            });
-        }
+        if (estimated.length) datasets.push({ label: cfg.label + ' (estimé)', data: estimated, borderColor: cfg.color, backgroundColor: cfg.color + '14', fill: false, tension: 0.4, pointRadius: 3, borderWidth: 2, hidden });
+        if (tested.length)    datasets.push({ label: cfg.label + ' (test)',   data: tested,     borderColor: cfg.color, backgroundColor: cfg.color, fill: false, showLine: false, pointRadius: 7, pointStyle: 'star', hidden });
     });
-
     const ctx = document.getElementById('chart-progress').getContext('2d');
     if (progressChart) { progressChart.destroy(); progressChart = null; }
-
     if (!datasets.length || datasets.every(d => !d.data.length)) {
         ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
         ctx.fillStyle = '#94a3b8'; ctx.font = '12px Inter'; ctx.textAlign = 'center';
         ctx.fillText('Aucune donnée enregistrée', ctx.canvas.width / 2, 80);
-        renderChartLegend();
-        return;
+        renderChartLegend(); return;
     }
-
     progressChart = new Chart(ctx, {
-        type: 'line',
-        data: { datasets },
-        options: {
-            plugins: { legend: { display: false } },
-            scales: { x: { type: 'category', grid: { display: false } }, y: { beginAtZero: false, grid: { color: '#f1f5f9' } } },
-            responsive: true, maintainAspectRatio: true
-        }
+        type: 'line', data: { datasets },
+        options: { plugins: { legend: { display: false } }, scales: { x: { type: 'category', grid: { display: false } }, y: { beginAtZero: false, grid: { color: '#f1f5f9' } } }, responsive: true, maintainAspectRatio: true }
     });
     renderChartLegend();
 }
@@ -1584,18 +1500,10 @@ function renderChartLegend() {
     CHART_EX_CONFIG.forEach(cfg => {
         const active = chartVisibility[cfg.id];
         const btn = document.createElement('button');
-        btn.className = `flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black border-2 tap transition-all ${
-            active
-                ? 'text-white border-transparent'
-                : 'bg-white text-slate-400 border-slate-200'
-        }`;
-        if (active) btn.style.backgroundColor = cfg.color;
-        btn.style.borderColor = active ? cfg.color : '';
+        btn.className = `flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black border-2 tap ${active ? 'text-white' : 'bg-white text-slate-400 border-slate-200'}`;
+        if (active) { btn.style.backgroundColor = cfg.color; btn.style.borderColor = cfg.color; }
         btn.innerHTML = `<span class="w-2 h-2 rounded-full inline-block" style="background:${cfg.color}"></span>${cfg.label}`;
-        btn.addEventListener('click', () => {
-            chartVisibility[cfg.id] = !chartVisibility[cfg.id];
-            renderProgressChart();
-        });
+        btn.addEventListener('click', () => { chartVisibility[cfg.id] = !chartVisibility[cfg.id]; renderProgressChart(); });
         container.appendChild(btn);
     });
 }
@@ -1918,25 +1826,13 @@ async function autoSyncFromCloud() {
             router('workout');
             updateSyncUI('ok');
             toast('☁️ Données synchronisées');
-        } else {
-            updateSyncUI('ok');
-        }
+        } else { updateSyncUI('ok'); }
     } catch(e) { updateSyncUI('error'); }
 }
 
-function confirmResetCloud() {
-    openDialog('⚠️ Réinitialiser le cloud ?', 'Toutes les données cloud seront remplacées par l\'état initial par défaut. Vos données locales ne sont pas affectées.', 'trash-2', () => {
-        openDialog('Dernière confirmation', 'Êtes-vous certain ? Les données cloud seront perdues définitivement.', 'alert-triangle', async () => {
-            if (!state.syncKey) { toast('Aucun ID configuré'); return; }
-            updateSyncUI('syncing');
-            try {
-                const res = await fetch(API_BASE + state.syncKey, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(INITIAL_STATE) });
-                if (res.ok) { updateSyncUI('ok'); toast('✅ Cloud réinitialisé'); }
-                else { updateSyncUI('error'); toast('❌ Erreur lors de la réinitialisation'); }
-            } catch(e) { updateSyncUI('error'); toast('❌ Erreur réseau'); }
-        }, 'Oui, réinitialiser');
-    }, 'Réinitialiser');
-}
+function saveSyncKey() { /* remplacé par applySyncKey */ }
+
+async function pullFromCloud() { /* remplacé par applySyncKey */ }
 
 function openSyncHelp() {
     openDialog('Comment obtenir un ID npoint.io', '1. Allez sur npoint.io\n2. Cliquez "New JSON Bin"\n3. Laissez le contenu vide ({})\n4. Cliquez "Save"\n5. Copiez la série de caractères dans l\'URL\n6. Collez-la ici.', 'help-circle', () => {});
@@ -1986,6 +1882,38 @@ function guideHTML() {
         </section>`;
 }
 
+/* ── RESET CLOUD ── */
+function confirmResetCloud() {
+    openDialog('⚠️ Réinitialiser le cloud ?', 'Les données cloud seront remplacées par les valeurs par défaut. Vos données locales ne sont pas affectées.', 'trash-2', () => {
+        openDialog('Dernière confirmation', 'Êtes-vous certain ? Les données cloud seront perdues définitivement.', 'alert-triangle', async () => {
+            if (!state.syncKey) { toast('Aucun ID configuré'); return; }
+            updateSyncUI('syncing');
+            try {
+                const res = await fetch(API_BASE + state.syncKey, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(INITIAL_STATE) });
+                if (res.ok) { updateSyncUI('ok'); toast('✅ Cloud réinitialisé'); }
+                else { updateSyncUI('error'); toast('❌ Erreur lors de la réinitialisation'); }
+            } catch(e) { updateSyncUI('error'); toast('❌ Erreur réseau'); }
+        }, 'Oui, réinitialiser');
+    }, 'Réinitialiser');
+}
+
+/* ── RETOUR VUE HOME SÉANCE (conserve le draft) ── */
+function backToSessionHome() {
+    document.getElementById('workout-active').classList.add('hidden');
+    document.getElementById('workout-home').classList.remove('hidden');
+    const sType = state.cycle.nextSession;
+    document.getElementById('cycle-badge').innerText = `Cycle ${state.cycle.currentCycle} · Semaine ${state.cycle.currentWeek}`;
+    document.getElementById('next-session-name').innerText = sType;
+    document.getElementById('next-session-desc').innerText = SESSIONS[sType].desc;
+    document.getElementById('estimated-time').innerText = '~' + estimateSessionDuration(sType) + ' min estimées';
+    const btnCorrect = document.getElementById('btn-correct-last');
+    if (state.history.length > 0) btnCorrect.classList.remove('hidden');
+    else btnCorrect.classList.add('hidden');
+    renderSpecialBanner();
+    renderSessionDIndicator();
+    lucide.createIcons();
+}
+
 /* ── PERSISTANCE ── */
 function save() {
     state.lastUpdated = Date.now();
@@ -2031,19 +1959,19 @@ window.addEventListener('load', () => {
     } catch(e) { console.warn('Erreur chargement state :', e); }
 
     migrateState();
+
+    // Demander permission notifications
     requestNotifPermission();
+
     router('workout');
     if (state.sessionDraft) toast('📋 Séance en cours — reprise disponible');
 
-    // Sync cloud au démarrage (cloud prioritaire)
     if (state.syncKey && navigator.onLine) {
         setTimeout(() => autoSyncFromCloud(), 800);
     }
 
     // Vérification cloud toutes les 20 secondes (premier plan uniquement)
-    setInterval(() => {
-        if (!document.hidden) autoSyncFromCloud();
-    }, 20000);
+    setInterval(() => { if (!document.hidden) autoSyncFromCloud(); }, 20000);
 });
 
 document.addEventListener('visibilitychange', () => {
