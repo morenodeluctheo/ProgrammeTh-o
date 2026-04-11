@@ -1033,6 +1033,17 @@ function renderExModalSets(ex, idx) {
     }
 
     if (ex.type === 'ss') {
+        // Bloc "Dernière fois" par sous-exercice, affiché une fois en tête
+        ex.exIds.forEach((subId, subIdx) => {
+            const lastSets = getLastPerfRange(subId);
+            if (lastSets) {
+                const perfBlock = document.createElement('div');
+                perfBlock.className = 'last-perf-block text-[11px] font-medium text-slate-600';
+                perfBlock.innerHTML = `<span class="font-black text-slate-800">${exName(subId)} — Dernière fois :</span> ${formatSetsPerf(lastSets)}`;
+                container.appendChild(perfBlock);
+            }
+        });
+        // Rounds
         for (let r = 0; r < ex.rounds; r++) {
             const wrap = document.createElement('div');
             wrap.className = 'bg-slate-50 rounded-2xl p-4 space-y-3';
@@ -1398,16 +1409,11 @@ function correctLastSession() {
 
 /* ── TIMER ── */
 function startTimer(seconds, nextLabel, exLabel) {
-    // Sur Android : ouvrir la minuterie Google dans un nouvel onglet (universel, pas besoin d'intent)
+    // Sur Android : ouvrir la minuterie native via intent SET_TIMER
     if (/android/i.test(navigator.userAgent)) {
-        const min = Math.floor(seconds / 60);
-        const sec = seconds % 60;
-        const query = min > 0
-            ? `minuterie ${min} minute${min > 1 ? 's' : ''}${sec > 0 ? ' ' + sec + ' secondes' : ''}`
-            : `minuterie ${sec} secondes`;
-        window.open('https://www.google.com/search?q=' + encodeURIComponent(query), '_blank');
-        scheduleNotif(seconds, '⏱ Repos terminé !', `Prochaine série : ${exLabel || nextLabel || '—'}`);
-        toast(`⏱ Minuterie ${seconds}s lancée`);
+        const intentUrl = `intent:#Intent;action=android.intent.action.SET_TIMER;S.android.intent.extra.alarm.LENGTH=${seconds};B.android.intent.extra.alarm.SKIP_UI=true;package=com.google.android.deskclock;end`;
+        window.location.href = intentUrl;
+        toast(`⏱ Minuterie ${seconds}s — ouvrez l'Horloge si elle ne s'est pas lancée`);
         return;
     }
     // Fallback : timer in-app (desktop / iOS)
@@ -1917,14 +1923,18 @@ function openDialog(title, body, icon, okCb, okLabel, cancelCb, cancelLabel) {
     document.getElementById('dialog-ok').innerText = okLabel || 'Confirmer';
     const cancelBtn = document.getElementById('dialog-cancel');
     cancelBtn.innerText = cancelLabel || 'Annuler';
-    cancelBtn.onclick = () => { closeDialog(); if (cancelCb) cancelCb(); };
+    cancelBtn.onclick = () => { const cb = cancelCb; closeDialog(); if (cb) cb(); };
     dialogCallback = okCb;
     document.getElementById('modal-dialog').classList.remove('hidden');
     lucide.createIcons();
 }
 
 function closeDialog() { document.getElementById('modal-dialog').classList.add('hidden'); dialogCallback = null; }
-document.getElementById('dialog-ok').addEventListener('click', () => { if (dialogCallback) dialogCallback(); closeDialog(); });
+document.getElementById('dialog-ok').addEventListener('click', () => {
+    const cb = dialogCallback;
+    closeDialog(); // fermer D'ABORD, puis exécuter le callback
+    if (cb) cb();  // le callback peut ainsi ouvrir un nouveau dialog sans être écrasé
+});
 
 /* ── GUIDE ── */
 function toggleGuide() {
@@ -1955,17 +1965,30 @@ function guideHTML() {
 
 /* ── RESET CLOUD ── */
 function confirmResetCloud() {
-    openDialog('⚠️ Réinitialiser le cloud ?', 'Les données cloud seront remplacées par les valeurs par défaut. Vos données locales ne sont pas affectées.', 'trash-2', () => {
-        openDialog('Dernière confirmation', 'Êtes-vous certain ? Les données cloud seront perdues définitivement.', 'alert-triangle', async () => {
-            if (!state.syncKey) { toast('Aucun ID configuré'); return; }
-            updateSyncUI('syncing');
-            try {
-                const res = await fetch(API_BASE + state.syncKey, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(INITIAL_STATE) });
-                if (res.ok) { updateSyncUI('ok'); toast('✅ Cloud réinitialisé'); }
-                else { updateSyncUI('error'); toast('❌ Erreur lors de la réinitialisation'); }
-            } catch(e) { updateSyncUI('error'); toast('❌ Erreur réseau'); }
-        }, 'Oui, réinitialiser');
-    }, 'Réinitialiser');
+    openDialog(
+        '⚠️ Réinitialiser les progressions ?',
+        'L\'historique des séances sera effacé, les répétitions cibles remises au minimum et le cycle redémarré à la Semaine 1 Séance A. Appliqué en local ET sur le cloud.',
+        'trash-2',
+        () => {
+            if (!state.syncKey) { toast('Aucun ID cloud configuré'); return; }
+            // Effacer l'historique
+            state.history = [];
+            // Remettre repTarget = repMin pour tous les exercices avec range
+            Object.values(state.heavySecondary).forEach(cfg => { cfg.repTarget = cfg.repMin; });
+            Object.values(state.accessories).forEach(cfg => { cfg.repTarget = cfg.repMin; });
+            // Redémarrer le cycle
+            state.cycle.currentCycle    = 1;
+            state.cycle.currentWeek     = 1;
+            state.cycle.nextSession     = 'A';
+            state.cycle.testChoice      = null;
+            state.cycle.isDeload        = false;
+            state.cycle.deloadRemaining = 0;
+            // Sauvegarder en local et pousser vers le cloud
+            save();
+            toast('✅ Progressions réinitialisées — Cycle 1 · Semaine 1 · Séance A');
+        },
+        'Oui, réinitialiser'
+    );
 }
 
 /* ── RETOUR VUE HOME SÉANCE (conserve le draft) ── */
