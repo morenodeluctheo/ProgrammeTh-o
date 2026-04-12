@@ -198,7 +198,13 @@
                 <div class="bg-slate-50 rounded-2xl p-4 text-sm">
                     <div id="cycle-status-text" class="font-bold text-slate-700">Cycle 1 · Semaine 1 · Prochaine : A</div>
                 </div>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="text-[9px] font-black uppercase text-slate-400 ml-1 block mb-1">Cycle</label>
+                        <select id="manual-cycle" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold text-sm outline-none">
+                            <option value="1">C1</option><option value="2">C2</option>
+                        </select>
+                    </div>
                     <div>
                         <label class="text-[9px] font-black uppercase text-slate-400 ml-1 block mb-1">Semaine</label>
                         <select id="manual-week" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold text-sm outline-none">
@@ -358,13 +364,13 @@
 
 <!-- DIALOG -->
 <div id="modal-dialog" class="fixed inset-0 bg-slate-900/85 z-[300] hidden flex items-end justify-center backdrop-blur-sm">
-    <div class="bg-white rounded-t-[2.5rem] p-8 w-full max-w-lg modal-slide-up">
-        <div id="dialog-icon-wrap" class="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 bg-indigo-50 text-indigo-600">
+    <div class="bg-white rounded-t-[2.5rem] p-8 w-full max-w-lg modal-slide-up" style="max-height:88vh;display:flex;flex-direction:column;">
+        <div id="dialog-icon-wrap" class="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 bg-indigo-50 text-indigo-600 shrink-0">
             <i id="dialog-icon" data-lucide="alert-circle" class="w-7 h-7"></i>
         </div>
-        <h3 id="dialog-title" class="text-xl font-black text-center uppercase leading-tight mb-2">Confirmation</h3>
-        <p id="dialog-body" class="text-slate-500 text-sm font-medium text-center leading-relaxed mb-8"></p>
-        <div class="space-y-3">
+        <h3 id="dialog-title" class="text-xl font-black text-center uppercase leading-tight mb-2 shrink-0">Confirmation</h3>
+        <p id="dialog-body" class="text-slate-500 text-sm font-medium text-center leading-relaxed mb-4 overflow-y-auto flex-1"></p>
+        <div class="space-y-3 shrink-0 pt-4">
             <button id="dialog-ok" class="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase text-xs tap shadow-lg">Confirmer</button>
             <button id="dialog-cancel" onclick="closeDialog()" class="w-full bg-slate-100 text-slate-500 py-4 rounded-2xl font-bold uppercase text-xs tap">Annuler</button>
         </div>
@@ -1347,6 +1353,7 @@ function finishSession() {
             if (state.cycle.currentWeek > 4) {
                 state.cycle.currentWeek = 1;
                 state.cycle.currentCycle++;
+                if (state.cycle.currentCycle > 2) state.cycle.currentCycle = 1;
                 state.cycle.testChoice = null;
                 if (draft.isTest) {
                     state.cycle.isDeload = true;
@@ -1373,24 +1380,103 @@ function finishSession() {
 
 function proposeEndCycleProgressions(lastDraft) {
     const proposals = [];
+    const cycleJustFinished = state.cycle.currentCycle - 1;
+    const cycleSessions = state.history.filter(h => h.cycle === cycleJustFinished);
+
+    // Exercices de force : toujours proposer
     const cIds = ['bench_press', 'deadlift', 'back_squat'];
     for (const id of cIds) {
         const inc = (id === 'bench_press') ? 2.5 : 5;
         proposals.push({ id, type: 'c', oldORM: state.orm[id], inc });
     }
-    const pExs = lastDraft.exercises.filter(e => e.type === 'p');
-    for (const ex of pExs) {
-        if (ex.techniqueOk !== false) proposals.push({ id: ex.id, type: 'p', oldORM: state.orm[ex.id], inc: 2.5 });
+
+    // Exercices de puissance : chercher dans tout l'historique du cycle
+    // Fallback : si l'exercice n'est pas trouvé dans le cycle (cycle incomplet),
+    // proposer quand même la progression (technique assumée satisfaisante)
+    const pIds = ['hang_power_clean', 'hang_power_snatch'];
+    for (const pId of pIds) {
+        let techniqueOk = true; // défaut : proposer
+        let found = false;
+        for (let i = cycleSessions.length - 1; i >= 0; i--) {
+            const ex = cycleSessions[i].exercises.find(e => e.id === pId && !e.skipped);
+            if (ex) {
+                techniqueOk = ex.techniqueOk !== false;
+                found = true;
+                break;
+            }
+        }
+        // Proposer si technique ok (ou exercice non trouvé dans cycle = fallback)
+        if (techniqueOk) {
+            proposals.push({ id: pId, type: 'p', oldORM: state.orm[pId], inc: 2.5 });
+        }
     }
+
     if (!proposals.length) return;
     showNextProgProposal(proposals, 0);
+}
+
+function buildCycleBilan(exId) {
+    const targetCycle = state.cycle.currentCycle - 1;
+    const sessions = state.history.filter(h => h.cycle === targetCycle);
+    if (!sessions.length) return '';
+
+    const sessionBlocks = [];
+    sessions.forEach(h => {
+        const ex = h.exercises.find(e => e.id === exId && !e.skipped && e.sets && e.sets.length);
+        if (!ex) return;
+
+        // Pills de sets avec code couleur
+        const pills = ex.sets.map(s => {
+            const real = (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : null;
+            const target = s.repsTarget;
+            let bg, color, text;
+            if (real === null) {
+                bg = '#f1f5f9'; color = '#94a3b8';
+                text = `×${target}→—`;
+            } else if (real >= target) {
+                bg = '#dcfce7'; color = '#16a34a';
+                text = `×${target}→${real}`;
+            } else if (real >= target - 1) {
+                bg = '#fff7ed'; color = '#ea580c';
+                text = `×${target}→${real}`;
+            } else {
+                bg = '#fef2f2'; color = '#dc2626';
+                text = `×${target}→${real}`;
+            }
+            return `<span style="background:${bg};color:${color};padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;display:inline-block;margin:2px 2px;">${text}</span>`;
+        }).join('');
+
+        // Indicateur technique pour exercices de puissance
+        let techniqueHtml = '';
+        if (ex.techniqueOk !== undefined) {
+            const ok = ex.techniqueOk !== false;
+            techniqueHtml = `<div style="font-size:10px;color:${ok ? '#16a34a' : '#dc2626'};margin-top:3px;">${ok ? '✅ Technique & vélocité : OK' : '❌ Technique & vélocité : insuffisante'}</div>`;
+        }
+
+        sessionBlocks.push(`
+            <div style="text-align:left;padding:8px 10px;background:#f8fafc;border-radius:12px;margin-bottom:6px;">
+                <div style="font-size:10px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Semaine ${h.week}</div>
+                <div>${pills}</div>
+                ${techniqueHtml}
+            </div>`);
+    });
+
+    if (!sessionBlocks.length) return '';
+    if (sessionBlocks.length > 8) sessionBlocks.splice(0, sessionBlocks.length - 8);
+
+    return `<div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:10px;">
+        <div style="font-size:9px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;text-align:center;">─ Bilan du cycle ─</div>
+        ${sessionBlocks.join('')}
+    </div>`;
 }
 
 function showNextProgProposal(proposals, i) {
     if (i >= proposals.length) { save(); return; }
     const p = proposals[i];
     const newORM = p.oldORM + p.inc;
-    openDialog('🎉 Fin de cycle — Progression', `${exName(p.id)} : ${p.oldORM} → ${newORM} kg (+${p.inc} kg)\nVoulez-vous appliquer cette progression ?`, 'trending-up',
+    const bilan  = buildCycleBilan(p.id);
+    const propositionHtml = `<div style="margin-bottom:8px;">${escapeHtml(exName(p.id))} : <strong>${p.oldORM} → ${newORM} kg</strong> (+${p.inc} kg)<br>Voulez-vous appliquer cette progression ?</div>${bilan}`;
+    openDialog('🎉 Fin de cycle — Progression', propositionHtml, 'trending-up',
         () => { state.orm[p.id] = newORM; state.ormLastUpdated[p.id] = Date.now(); showNextProgProposal(proposals, i + 1); },
         'Oui, appliquer',
         () => showNextProgProposal(proposals, i + 1),
@@ -1820,15 +1906,20 @@ function saveEquipment() {
 
 function renderCycleStatus() {
     document.getElementById('cycle-status-text').innerText = `Cycle ${state.cycle.currentCycle} · Semaine ${state.cycle.currentWeek} · Prochaine : ${state.cycle.nextSession}`;
+    document.getElementById('manual-cycle').value = state.cycle.currentCycle <= 2 ? state.cycle.currentCycle : 2;
     document.getElementById('manual-week').value = state.cycle.currentWeek;
     document.getElementById('manual-next-session').value = state.cycle.nextSession;
 }
 
 function applyCycleManualEdits() {
-    const week = parseInt(document.getElementById('manual-week').value);
-    const next = document.getElementById('manual-next-session').value;
-    openDialog('Modifier la position dans le cycle ?', `Semaine → ${week}, Prochaine séance → ${next}`, 'refresh-cw', () => {
-        state.cycle.currentWeek = week; state.cycle.nextSession = next; state.cycle.testChoice = null;
+    const cycle = parseInt(document.getElementById('manual-cycle').value);
+    const week  = parseInt(document.getElementById('manual-week').value);
+    const next  = document.getElementById('manual-next-session').value;
+    openDialog('Modifier la position dans le cycle ?', `Cycle → ${cycle}, Semaine → ${week}, Prochaine séance → ${next}`, 'refresh-cw', () => {
+        state.cycle.currentCycle = cycle;
+        state.cycle.currentWeek  = week;
+        state.cycle.nextSession  = next;
+        state.cycle.testChoice   = null;
         save(); renderCycleStatus(); toast('✅ Cycle mis à jour');
     });
 }
@@ -1923,9 +2014,19 @@ function openSyncHelp() {
 }
 
 /* ── DIALOG ── */
+function escapeHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function openDialog(title, body, icon, okCb, okLabel, cancelCb, cancelLabel) {
     document.getElementById('dialog-title').innerText = title;
-    document.getElementById('dialog-body').innerText  = body;
+    // Si le body contient du HTML (commence par <), l'injecter directement, sinon échapper
+    const bodyEl = document.getElementById('dialog-body');
+    if (typeof body === 'string' && body.trimStart().startsWith('<')) {
+        bodyEl.innerHTML = body;
+    } else {
+        bodyEl.innerHTML = escapeHtml(body).replace(/\n/g, '<br>');
+    }
     document.getElementById('dialog-icon').setAttribute('data-lucide', icon || 'alert-circle');
     document.getElementById('dialog-ok').innerText = okLabel || 'Confirmer';
     const cancelBtn = document.getElementById('dialog-cancel');
