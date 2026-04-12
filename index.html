@@ -369,7 +369,8 @@
             <i id="dialog-icon" data-lucide="alert-circle" class="w-7 h-7"></i>
         </div>
         <h3 id="dialog-title" class="text-xl font-black text-center uppercase leading-tight mb-2 shrink-0">Confirmation</h3>
-        <p id="dialog-body" class="text-slate-500 text-sm font-medium text-center leading-relaxed mb-4 overflow-y-auto flex-1"></p>
+        <div id="dialog-body-fixed" class="text-slate-500 text-sm font-medium text-center leading-relaxed shrink-0"></div>
+        <div id="dialog-body-scroll" class="overflow-y-auto flex-1 mt-1"></div>
         <div class="space-y-3 shrink-0 pt-4">
             <button id="dialog-ok" class="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase text-xs tap shadow-lg">Confirmer</button>
             <button id="dialog-cancel" onclick="closeDialog()" class="w-full bg-slate-100 text-slate-500 py-4 rounded-2xl font-bold uppercase text-xs tap">Annuler</button>
@@ -398,6 +399,13 @@
 /* ── CONSTANTES ── */
 const STORAGE_KEY = 'theo_force_v1_state';
 const API_BASE    = 'https://api.npoint.io/';
+const CABLE_EXERCISES = new Set(['face_pull','cable_lateral_raise','pallof_press','leg_curl','cable_curl','crunch_cable','lat_pulldown','incline_curl_db']);
+function isCable(id) { return CABLE_EXERCISES.has(id); }
+function lbsToKg(lbs) { return Math.round(lbs * 0.453 * 10) / 10; }
+function weightDisplay(id, weight) {
+    if (isCable(id)) return `${weight} lbs (≈ ${lbsToKg(weight)} kg)`;
+    return `${weight} kg`;
+}
 
 const EX_NAMES = {
     back_squat:            'Back Squat',
@@ -498,7 +506,7 @@ const INITIAL_STATE = {
         lat_pulldown:        { repMin:8,  repMax:10, repTarget:8,  weight:50, inc:2.5,  rest:90  },
         face_pull:           { repMin:12, repMax:15, repTarget:12, weight:15, inc:2.5,  rest:45  },
         cable_lateral_raise: { repMin:12, repMax:15, repTarget:12, weight:8,  inc:1.25, rest:45  },
-        pallof_press:        { repMin:8,  repMax:8,  repTarget:8,  weight:12, inc:2.5,  rest:45  },
+        pallof_press:        { repMin:8,  repMax:8,  repTarget:8,  repsFixed:8, weight:12, inc:2.5, rest:45, holdTimeTarget:3, holdTimeMin:3, holdTimeMax:5 },
         leg_curl:            { repMin:10, repMax:12, repTarget:10, weight:40, inc:2.5,  rest:90  },
         cable_curl:          { repMin:10, repMax:12, repTarget:10, weight:15, inc:2.5,  rest:45  },
         crunch_cable:        { repMin:15, repMax:20, repTarget:15, weight:20, inc:2.5,  rest:45  },
@@ -522,6 +530,7 @@ const INITIAL_STATE = {
     history:  [],
     exerciseNotes: {},
     sessionDraft: null,
+    cycleStartedAt: 0,
     lastUpdated:  0
 };
 
@@ -540,6 +549,12 @@ let notifPermission = 'default';
 /* ── UTILITAIRES ── */
 function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 function r025(v) { return Math.floor(v * 4) / 4; }
+function roundToPlates(weight) {
+    if (!state.plates || !state.plates.length) return r025(weight);
+    const minPlate = Math.min(...state.plates);
+    const increment = 2 * minPlate; // chaque disque posé des deux côtés
+    return Math.round(weight / increment) * increment;
+}
 function nRM(orm, n) { return orm / (1 + n / 30); }
 function e1RM(w, r) { return r === 1 ? w : w * (1 + r / 30); }
 function exName(id) { return EX_NAMES[id] || id; }
@@ -577,10 +592,10 @@ function scheduleNotif(delaySeconds, title, body) {
 function getPrescription(exId, type, week, isDeload, setsOverride) {
     if (isDeload) {
         if (type === 'p') {
-            return [{ weight: r025(state.orm[exId] * 0.7), repsTarget: 3, label: '70% 1RM — décharge' }];
+            return [{ weight: roundToPlates(state.orm[exId] * 0.7), repsTarget: 3, label: '70% 1RM — décharge' }];
         }
         if (type === 'c') {
-            const base = r025(nRM(state.orm[exId], 6) * 0.7);
+            const base = roundToPlates(nRM(state.orm[exId], 6) * 0.7);
             return Array(2).fill(null).map(() => ({ weight: base, repsTarget: 6, label: '70% charge normale' }));
         }
         if (type === 'h' || type === 'a') {
@@ -600,9 +615,9 @@ function getPrescription(exId, type, week, isDeload, setsOverride) {
             4: { pct: 0.91, reps: 1, sets: 3, extra: { pct: 0.91, reps: 2 } }
         };
         const s = schema[week];
-        const w = r025(orm * s.pct);
+        const w = roundToPlates(orm * s.pct);
         const arr = Array(s.sets).fill(null).map(() => ({ weight: w, repsTarget: s.reps, label: `${Math.round(s.pct * 100)}% 1RM` }));
-        if (s.extra) arr.push({ weight: r025(orm * s.extra.pct), repsTarget: s.extra.reps, label: `${Math.round(s.extra.pct * 100)}% 1RM` });
+        if (s.extra) arr.push({ weight: roundToPlates(orm * s.extra.pct), repsTarget: s.extra.reps, label: `${Math.round(s.extra.pct * 100)}% 1RM` });
         return arr;
     }
 
@@ -611,32 +626,32 @@ function getPrescription(exId, type, week, isDeload, setsOverride) {
         if (week === 1) {
             const w6 = nRM(orm, 6);
             return [
-                { weight: r025(w6 * 0.94), repsTarget: 6, label: '94% du 6RM' },
-                { weight: r025(w6 * 0.90), repsTarget: 6, label: '90% du 6RM' },
-                { weight: r025(w6 * 0.90), repsTarget: 6, label: '90% du 6RM' }
+                { weight: roundToPlates(w6 * 0.94), repsTarget: 6, label: '94% du 6RM' },
+                { weight: roundToPlates(w6 * 0.90), repsTarget: 6, label: '90% du 6RM' },
+                { weight: roundToPlates(w6 * 0.90), repsTarget: 6, label: '90% du 6RM' }
             ];
         }
         if (week === 2) {
             const w3 = nRM(orm, 3);
             return [
-                { weight: r025(w3 * 1.00), repsTarget: 3, label: '100% du 3RM' },
-                { weight: r025(w3 * 0.96), repsTarget: 3, label: '96% du 3RM' },
-                { weight: r025(w3 * 0.96), repsTarget: 3, label: '96% du 3RM' }
+                { weight: roundToPlates(w3 * 1.00), repsTarget: 3, label: '100% du 3RM' },
+                { weight: roundToPlates(w3 * 0.96), repsTarget: 3, label: '96% du 3RM' },
+                { weight: roundToPlates(w3 * 0.96), repsTarget: 3, label: '96% du 3RM' }
             ];
         }
         if (week === 3) {
             const w4 = nRM(orm, 4);
             return [
-                { weight: r025(w4 * 0.96), repsTarget: 4, label: '96% du 4RM' },
-                { weight: r025(w4 * 0.92), repsTarget: 4, label: '92% du 4RM' },
-                { weight: r025(w4 * 0.92), repsTarget: 4, label: '92% du 4RM' }
+                { weight: roundToPlates(w4 * 0.96), repsTarget: 4, label: '96% du 4RM' },
+                { weight: roundToPlates(w4 * 0.92), repsTarget: 4, label: '92% du 4RM' },
+                { weight: roundToPlates(w4 * 0.92), repsTarget: 4, label: '92% du 4RM' }
             ];
         }
         if (week === 4) {
             return [
-                { weight: r025(nRM(orm, 2) * 1.00), repsTarget: 2, label: '100% du 2RM' },
-                { weight: r025(nRM(orm, 3) * 0.96), repsTarget: 3, label: '96% du 3RM' },
-                { weight: r025(nRM(orm, 4) * 0.92), repsTarget: 4, label: '92% du 4RM' }
+                { weight: roundToPlates(nRM(orm, 2) * 1.00), repsTarget: 2, label: '100% du 2RM' },
+                { weight: roundToPlates(nRM(orm, 3) * 0.96), repsTarget: 3, label: '96% du 3RM' },
+                { weight: roundToPlates(nRM(orm, 4) * 0.92), repsTarget: 4, label: '92% du 4RM' }
             ];
         }
     }
@@ -644,10 +659,12 @@ function getPrescription(exId, type, week, isDeload, setsOverride) {
     if (type === 'h' || type === 'a') {
         const cfg = exCfg(exId);
         const n = setsOverride || 3;
-        const rt = cfg.repTarget !== undefined ? cfg.repTarget : cfg.repMin;
-        return Array(n).fill(null).map(() => ({
-            weight: cfg.weight, repsTarget: rt, label: `Cible : ${cfg.repMin}–${cfg.repMax} reps`
-        }));
+        const rt = cfg.repsFixed !== undefined ? cfg.repsFixed : (cfg.repTarget !== undefined ? cfg.repTarget : cfg.repMin);
+        const baseSet = { weight: cfg.weight, repsTarget: rt, label: `Cible : ${cfg.repMin}–${cfg.repMax} reps` };
+        if (exId === 'pallof_press' && cfg.holdTimeTarget !== undefined) {
+            return Array(n).fill(null).map(() => ({ ...baseSet, holdTime: cfg.holdTimeTarget, label: `${rt} reps · tenir ${cfg.holdTimeTarget}s` }));
+        }
+        return Array(n).fill(null).map(() => ({ ...baseSet }));
     }
 
     return [];
@@ -937,16 +954,22 @@ function getLastPerfFixed(exId, repsTargetPerSet) {
     return null;
 }
 
-function formatSetsPerf(sets) {
+function formatSetsPerf(sets, exId) {
     if (!sets || !sets.length) return '';
+    const cable = exId && isCable(exId);
     const allSameWeight = sets.every(s => s.weight === sets[0].weight);
     if (allSameWeight && sets[0].weight !== undefined) {
         const reps = sets.map(s => (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : '—').join(',');
-        return `${sets[0].weight}kg × ${reps}`;
+        const wLabel = cable ? `${sets[0].weight}lbs (≈${lbsToKg(sets[0].weight)}kg)` : `${sets[0].weight}kg`;
+        return `${wLabel} × ${reps}`;
     }
     return sets.map(s => {
         const r = (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : '—';
-        return s.weight !== undefined ? `${s.weight}×${r}` : `${r}`;
+        if (s.weight !== undefined) {
+            const wLabel = cable ? `${s.weight}lbs` : `${s.weight}`;
+            return `${wLabel}×${r}`;
+        }
+        return `${r}`;
     }).join(' - ');
 }
 
@@ -995,7 +1018,7 @@ function openExModal(idx) {
         const sets = getLastPerfRange(ex.id);
         if (sets) {
             lastPerfEl.className = 'mt-2 last-perf-block text-[11px] font-medium text-slate-600';
-            lastPerfEl.innerHTML = `<span class="font-black text-slate-800">Dernière fois :</span> ${formatSetsPerf(sets)}`;
+            lastPerfEl.innerHTML = `<span class="font-black text-slate-800">Dernière fois :</span> ${formatSetsPerf(sets, ex.id)}`;
         }
     } else if (ex.type === 'c' || ex.type === 'p') {
         const targetPerSet = ex.sets && ex.sets[0] ? ex.sets[0].repsTarget : null;
@@ -1003,7 +1026,7 @@ function openExModal(idx) {
             const sets = getLastPerfFixed(ex.id, targetPerSet);
             if (sets) {
                 lastPerfEl.className = 'mt-2 last-perf-block text-[11px] font-medium text-slate-600';
-                lastPerfEl.innerHTML = `<span class="font-black text-slate-800">Dernière fois (×${targetPerSet}) :</span> ${formatSetsPerf(sets)}`;
+                lastPerfEl.innerHTML = `<span class="font-black text-slate-800">Dernière fois (×${targetPerSet}) :</span> ${formatSetsPerf(sets, ex.id)}`;
             }
         }
     }
@@ -1056,7 +1079,7 @@ function renderExModalSets(ex, idx) {
             if (lastSets) {
                 const perfBlock = document.createElement('div');
                 perfBlock.className = 'last-perf-block text-[11px] font-medium text-slate-600';
-                perfBlock.innerHTML = `<span class="font-black text-slate-800">${exName(subId)} — Dernière fois :</span> ${formatSetsPerf(lastSets)}`;
+                perfBlock.innerHTML = `<span class="font-black text-slate-800">${exName(subId)} — Dernière fois :</span> ${formatSetsPerf(lastSets, subId)}`;
                 container.appendChild(perfBlock);
             }
         });
@@ -1074,7 +1097,7 @@ function renderExModalSets(ex, idx) {
                 row.innerHTML = `
                     <div class="flex-1 pr-3 cursor-pointer" onclick="renderPlates(${setData.weight})">
                         <div class="text-[10px] font-bold text-slate-500">${exName(subId)}</div>
-                        <div class="text-xs font-black">${setData.weight} kg · Cible : ${setData.repsTarget}</div>
+                        <div class="text-xs font-black">${weightDisplay(subId, setData.weight)} · Cible : ${setData.repsTarget}</div>
                     </div>
                     ${stepperHtml}`;
                 wrap.appendChild(row);
@@ -1098,7 +1121,7 @@ function renderExModalSets(ex, idx) {
                 <div class="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center font-black text-xs text-slate-500 shrink-0">${sIdx + 1}</div>
                 <div>
                     <div class="text-[9px] font-bold text-slate-400 uppercase">Objectif</div>
-                    <div class="text-sm font-black">${s.weight} kg × ${s.repsTarget}</div>
+                    <div class="text-sm font-black">${weightDisplay(ex.id, s.weight)} × ${s.repsTarget}${ex.id === 'pallof_press' && s.holdTime ? ` · tenir ${s.holdTime}s` : ''}</div>
                     ${s.label ? `<div class="text-[9px] font-medium text-slate-400">${s.label}</div>` : ''}
                 </div>
             </div>
@@ -1170,43 +1193,47 @@ function checkDoubleProgression(ex) {
     if (ex.type !== 'h' && ex.type !== 'a') return;
     const cfg = exCfg(ex.id);
     if (!cfg) return;
+
+    // Pallof Press : progression par temps de maintien
+    if (ex.id === 'pallof_press' && cfg.holdTimeTarget !== undefined) {
+        const repsFixed = cfg.repsFixed || cfg.repMin || 8;
+        const allReached = ex.sets.every(s => s.repsReal !== null && s.repsReal !== undefined && s.repsReal >= repsFixed);
+        if (!allReached) return;
+        const ht = cfg.holdTimeTarget;
+        if (ht < cfg.holdTimeMax) {
+            openDialog('🎯 Objectif atteint !',
+                `Pallof Press — tous les sets à ${repsFixed} reps · ${ht}s de maintien.\nPasser à ${ht + 1}s la prochaine fois ?`,
+                'trending-up',
+                () => { cfg.holdTimeTarget = ht + 1; save(); toast(`✅ Pallof Press → tenir ${ht + 1}s`); },
+                'Oui, progresser', () => {}, 'Non, garder');
+        } else {
+            const newWeight = r025(cfg.weight + cfg.inc);
+            openDialog('🏆 Temps max atteint !',
+                `Pallof Press — ${ht}s atteint (max). Passer à ${newWeight} lbs et revenir à ${cfg.holdTimeMin}s ?`,
+                'trending-up',
+                () => { cfg.weight = newWeight; cfg.holdTimeTarget = cfg.holdTimeMin; save(); toast(`✅ Pallof Press → ${newWeight} lbs · ${cfg.holdTimeMin}s`); },
+                'Oui, progresser', () => {}, 'Non, garder');
+        }
+        return;
+    }
+
     const rt = cfg.repTarget !== undefined ? cfg.repTarget : cfg.repMin;
-    // Tous les sets doivent avoir repsReal >= repTarget
     const allReached = ex.sets.every(s => s.repsReal !== null && s.repsReal !== undefined && s.repsReal >= rt);
     if (!allReached) return;
 
     if (rt < cfg.repMax) {
-        // Proposer d'augmenter d'1 rep
-        openDialog(
-            '🎯 Objectif atteint !',
+        openDialog('🎯 Objectif atteint !',
             `Tous les sets à ${rt} reps. Passer à ${rt + 1} reps cible la prochaine fois ?`,
             'trending-up',
-            () => {
-                cfg.repTarget = rt + 1;
-                save();
-                toast(`✅ Cible → ${rt + 1} reps pour ${exName(ex.id)}`);
-            },
-            'Oui, progresser',
-            () => {},
-            'Non, garder'
-        );
+            () => { cfg.repTarget = rt + 1; save(); toast(`✅ Cible → ${rt + 1} reps pour ${exName(ex.id)}`); },
+            'Oui, progresser', () => {}, 'Non, garder');
     } else {
-        // repTarget === repMax → augmenter le poids, revenir à repMin
         const newWeight = r025(cfg.weight + cfg.inc);
-        openDialog(
-            '🏆 Plafond atteint !',
-            `Tous les sets à ${rt} reps (max). Passer à ${newWeight} kg et revenir à ${cfg.repMin} reps ?`,
+        openDialog('🏆 Plafond atteint !',
+            `Tous les sets à ${rt} reps (max). Passer à ${newWeight} ${isCable(ex.id) ? 'lbs' : 'kg'} et revenir à ${cfg.repMin} reps ?`,
             'trending-up',
-            () => {
-                cfg.weight    = newWeight;
-                cfg.repTarget = cfg.repMin;
-                save();
-                toast(`✅ ${exName(ex.id)} → ${newWeight} kg · ${cfg.repMin} reps`);
-            },
-            'Oui, progresser',
-            () => {},
-            'Non, garder'
-        );
+            () => { cfg.weight = newWeight; cfg.repTarget = cfg.repMin; save(); toast(`✅ ${exName(ex.id)} → ${newWeight} ${isCable(ex.id) ? 'lbs' : 'kg'} · ${cfg.repMin} reps`); },
+            'Oui, progresser', () => {}, 'Non, garder');
     }
 }
 
@@ -1352,13 +1379,18 @@ function finishSession() {
             state.cycle.currentWeek++;
             if (state.cycle.currentWeek > 4) {
                 state.cycle.currentWeek = 1;
+                // Enregistrer le début du nouveau cycle
+                state.cycleStartedAt = Date.now();
+                const prevCycle = state.cycle.currentCycle;
                 state.cycle.currentCycle++;
                 if (state.cycle.currentCycle > 2) state.cycle.currentCycle = 1;
                 state.cycle.testChoice = null;
                 if (draft.isTest) {
+                    // Test 1RM → décharge
                     state.cycle.isDeload = true;
                     state.cycle.deloadRemaining = 3;
                 } else {
+                    // Semaine normale (cycle 1 OU cycle 2) → proposer progressions
                     proposeEndCycleProgressions(draft);
                 }
             }
@@ -1368,6 +1400,7 @@ function finishSession() {
             state.cycle.deloadRemaining--;
             if (state.cycle.deloadRemaining === 0) {
                 state.cycle.isDeload = false;
+                state.cycleStartedAt = Date.now();
                 proposeEndCycleProgressions(draft);
             }
         }
@@ -1417,45 +1450,77 @@ function proposeEndCycleProgressions(lastDraft) {
 
 function buildCycleBilan(exId) {
     const targetCycle = state.cycle.currentCycle - 1;
-    const sessions = state.history.filter(h => h.cycle === targetCycle);
+    // Fallback cycleStartedAt : date de la première séance du cycle terminé
+    let startTs = state.cycleStartedAt || 0;
+    if (!startTs) {
+        const firstOfCycle = state.history.find(h => h.cycle === targetCycle);
+        startTs = firstOfCycle ? firstOfCycle.date : 0;
+    }
+    // Filtrer sur le cycle terminé ET depuis cycleStartedAt du cycle précédent
+    // On cherche les séances du cycle terminé qui sont postérieures au démarrage de ce cycle
+    // Le cycleStartedAt stocké est celui du cycle COURANT (qui vient de démarrer)
+    // Pour le cycle terminé, on remonte au cycleStartedAt d'avant, donc on filtre simplement
+    // sur h.cycle === targetCycle (le filtrage par date est pour éviter les cycles précédents homonymes)
+    // On prend les séances du dernier "run" de ce cycle numéro en filtrant sur celles
+    // qui sont >= au cycleStartedAt du cycle d'avant (qu'on ne stocke pas directement)
+    // Solution pragmatique : prendre les séances du targetCycle les plus récentes,
+    // groupées en "run" consécutif le plus récent
+    const allOfCycle = state.history.filter(h => h.cycle === targetCycle).sort((a,b) => a.date - b.date);
+    // Trouver la dernière rupture de continuité (gap > 90 jours = nouveau run du même cycle numéro)
+    let runStart = 0;
+    for (let i = allOfCycle.length - 1; i > 0; i--) {
+        const gap = allOfCycle[i].date - allOfCycle[i-1].date;
+        if (gap > 90 * 24 * 3600 * 1000) { runStart = i; break; }
+    }
+    const sessions = allOfCycle.slice(runStart);
     if (!sessions.length) return '';
 
     const sessionBlocks = [];
     sessions.forEach(h => {
-        const ex = h.exercises.find(e => e.id === exId && !e.skipped && e.sets && e.sets.length);
+        // Chercher l'exercice, qu'il soit complété ou skippé
+        const ex = h.exercises.find(e => e.id === exId);
         if (!ex) return;
 
-        // Pills de sets avec code couleur
-        const pills = ex.sets.map(s => {
-            const real = (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : null;
-            const target = s.repsTarget;
-            let bg, color, text;
-            if (real === null) {
-                bg = '#f1f5f9'; color = '#94a3b8';
-                text = `×${target}→—`;
-            } else if (real >= target) {
-                bg = '#dcfce7'; color = '#16a34a';
-                text = `×${target}→${real}`;
-            } else if (real >= target - 1) {
-                bg = '#fff7ed'; color = '#ea580c';
-                text = `×${target}→${real}`;
-            } else {
-                bg = '#fef2f2'; color = '#dc2626';
-                text = `×${target}→${real}`;
-            }
-            return `<span style="background:${bg};color:${color};padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;display:inline-block;margin:2px 2px;">${text}</span>`;
-        }).join('');
+        let pills = '';
+        if (ex.skipped || !ex.sets || !ex.sets.length) {
+            // Exercice passé : afficher 0 reps pour chaque set prévu
+            const setCount = (ex.sets && ex.sets.length) ? ex.sets.length : 3;
+            const targets = (ex.sets && ex.sets.length) ? ex.sets.map(s => s.repsTarget) : Array(setCount).fill('?');
+            pills = targets.map(t =>
+                `<span style="background:#f1f5f9;color:#94a3b8;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;display:inline-block;margin:2px 2px;">×${t}→0</span>`
+            ).join('');
+        } else {
+            pills = ex.sets.map(s => {
+                const real = (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : null;
+                const target = s.repsTarget;
+                let bg, color, text;
+                if (real === null || real === 0) {
+                    bg = '#f1f5f9'; color = '#94a3b8';
+                    text = `×${target}→${real === 0 ? 0 : '—'}`;
+                } else if (real >= target) {
+                    bg = '#dcfce7'; color = '#16a34a';
+                    text = `×${target}→${real}`;
+                } else if (real >= target - 1) {
+                    bg = '#fff7ed'; color = '#ea580c';
+                    text = `×${target}→${real}`;
+                } else {
+                    bg = '#fef2f2'; color = '#dc2626';
+                    text = `×${target}→${real}`;
+                }
+                return `<span style="background:${bg};color:${color};padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;display:inline-block;margin:2px 2px;">${text}</span>`;
+            }).join('');
+        }
 
         // Indicateur technique pour exercices de puissance
         let techniqueHtml = '';
-        if (ex.techniqueOk !== undefined) {
+        if (!ex.skipped && ex.techniqueOk !== undefined) {
             const ok = ex.techniqueOk !== false;
             techniqueHtml = `<div style="font-size:10px;color:${ok ? '#16a34a' : '#dc2626'};margin-top:3px;">${ok ? '✅ Technique & vélocité : OK' : '❌ Technique & vélocité : insuffisante'}</div>`;
         }
 
         sessionBlocks.push(`
             <div style="text-align:left;padding:8px 10px;background:#f8fafc;border-radius:12px;margin-bottom:6px;">
-                <div style="font-size:10px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Semaine ${h.week}</div>
+                <div style="font-size:10px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Semaine ${h.week}${ex.skipped ? ' — <span style=\'color:#94a3b8\'>Passé</span>' : ''}</div>
                 <div>${pills}</div>
                 ${techniqueHtml}
             </div>`);
@@ -1475,12 +1540,13 @@ function showNextProgProposal(proposals, i) {
     const p = proposals[i];
     const newORM = p.oldORM + p.inc;
     const bilan  = buildCycleBilan(p.id);
-    const propositionHtml = `<div style="margin-bottom:8px;">${escapeHtml(exName(p.id))} : <strong>${p.oldORM} → ${newORM} kg</strong> (+${p.inc} kg)<br>Voulez-vous appliquer cette progression ?</div>${bilan}`;
-    openDialog('🎉 Fin de cycle — Progression', propositionHtml, 'trending-up',
+    const fixedBody = `<strong>${escapeHtml(exName(p.id))}</strong> : ${p.oldORM} → <strong>${newORM} kg</strong> (+${p.inc} kg)<br><span style="color:#64748b">Voulez-vous appliquer cette progression ?</span>`;
+    openDialog('🎉 Fin de cycle — Progression', fixedBody, 'trending-up',
         () => { state.orm[p.id] = newORM; state.ormLastUpdated[p.id] = Date.now(); showNextProgProposal(proposals, i + 1); },
         'Oui, appliquer',
         () => showNextProgProposal(proposals, i + 1),
-        'Passer');
+        'Passer',
+        bilan);
 }
 
 /* ── CORRIGER DERNIÈRE SÉANCE ── */
@@ -1820,31 +1886,86 @@ function renderExerciseParamsList() {
     Object.entries(allEx).forEach(([id, cfg]) => {
         const noteVal = state.exerciseNotes[id] || '';
         const rt = cfg.repTarget !== undefined ? cfg.repTarget : cfg.repMin;
+        const cable = isCable(id);
+        const weightUnit = cable ? 'lbs' : 'kg';
+        const weightKgHint = cable ? ` <span style="color:#94a3b8;font-size:9px">(≈ ${lbsToKg(cfg.weight)} kg)</span>` : '';
         const div = document.createElement('div');
         div.className = 'pb-5 border-b border-slate-100 last:border-0 last:pb-0';
-        div.innerHTML = `
-            <div class="font-black text-sm uppercase mb-3">${exName(id)}</div>
-            <div class="bg-indigo-50 rounded-xl px-3 py-2 mb-3 text-[10px] font-bold text-indigo-700">Cible courante : ${rt} reps · ${cfg.weight} kg</div>
-            <div class="grid grid-cols-2 gap-3 mb-3">
-                <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Charge (kg)</label>
-                    <input type="number" step="0.25" id="ex-weight-${id}" value="${cfg.weight}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
-                <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Incrément (kg)</label>
-                    <input type="number" step="0.25" id="ex-inc-${id}" value="${cfg.inc}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
-                <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Reps min</label>
-                    <input type="number" step="1" id="ex-rmin-${id}" value="${cfg.repMin}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
-                <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Reps max</label>
-                    <input type="number" step="1" id="ex-rmax-${id}" value="${cfg.repMax}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
-                <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Reps cible</label>
-                    <input type="number" step="1" id="ex-rtarget-${id}" value="${rt}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
-                <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Repos (s)</label>
-                    <input type="number" step="15" id="ex-rest-${id}" value="${cfg.rest}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
-            </div>
-            <button onclick="saveExParams('${id}', '${cfg._type}')" class="w-full bg-slate-100 text-slate-700 py-2.5 rounded-xl text-[10px] font-black uppercase tap">Appliquer</button>
-            <div class="mt-3">
-                <label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Note personnelle</label>
-                <textarea class="note-textarea" placeholder="Note sur cet exercice..." oninput="saveExNoteFromSettings('${id}', this.value)">${noteVal}</textarea>
-            </div>`;
+
+        if (id === 'pallof_press') {
+            // Pallof Press : champs spéciaux avec holdTime
+            const ht = cfg.holdTimeTarget || 3;
+            const htMin = cfg.holdTimeMin || 3;
+            const htMax = cfg.holdTimeMax || 5;
+            const repsFixed = cfg.repsFixed !== undefined ? cfg.repsFixed : (cfg.repMin || 8);
+            div.innerHTML = `
+                <div class="font-black text-sm uppercase mb-3">${exName(id)}</div>
+                <div class="bg-indigo-50 rounded-xl px-3 py-2 mb-3 text-[10px] font-bold text-indigo-700">Cible : ${repsFixed} reps · tenir ${ht}s · ${cfg.weight} ${weightUnit}${weightKgHint}</div>
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Charge (${weightUnit})</label>
+                        <input type="number" step="0.25" id="ex-weight-${id}" value="${cfg.weight}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Incrément (${weightUnit})</label>
+                        <input type="number" step="0.25" id="ex-inc-${id}" value="${cfg.inc}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Reps par set</label>
+                        <input type="number" step="1" id="ex-reps-fixed-${id}" value="${repsFixed}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Repos (s)</label>
+                        <input type="number" step="15" id="ex-rest-${id}" value="${cfg.rest}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Temps cible (s)</label>
+                        <input type="number" step="1" id="ex-ht-${id}" value="${ht}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Temps min (s)</label>
+                        <input type="number" step="1" id="ex-htmin-${id}" value="${htMin}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Temps max (s)</label>
+                        <input type="number" step="1" id="ex-htmax-${id}" value="${htMax}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                </div>
+                <button onclick="saveExParamsPallof()" class="w-full bg-slate-100 text-slate-700 py-2.5 rounded-xl text-[10px] font-black uppercase tap">Appliquer</button>
+                <div class="mt-3">
+                    <label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Note personnelle</label>
+                    <textarea class="note-textarea" placeholder="Note sur cet exercice..." oninput="saveExNoteFromSettings('${id}', this.value)">${noteVal}</textarea>
+                </div>`;
+        } else {
+            div.innerHTML = `
+                <div class="font-black text-sm uppercase mb-3">${exName(id)}</div>
+                <div class="bg-indigo-50 rounded-xl px-3 py-2 mb-3 text-[10px] font-bold text-indigo-700">Cible courante : ${rt} reps · ${cfg.weight} ${weightUnit}${weightKgHint}</div>
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Charge (${weightUnit})</label>
+                        <input type="number" step="0.25" id="ex-weight-${id}" value="${cfg.weight}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Incrément (${weightUnit})</label>
+                        <input type="number" step="0.25" id="ex-inc-${id}" value="${cfg.inc}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Reps min</label>
+                        <input type="number" step="1" id="ex-rmin-${id}" value="${cfg.repMin}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Reps max</label>
+                        <input type="number" step="1" id="ex-rmax-${id}" value="${cfg.repMax}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Reps cible</label>
+                        <input type="number" step="1" id="ex-rtarget-${id}" value="${rt}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                    <div><label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Repos (s)</label>
+                        <input type="number" step="15" id="ex-rest-${id}" value="${cfg.rest}" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-black text-sm text-center outline-none"></div>
+                </div>
+                <button onclick="saveExParams('${id}', '${cfg._type}')" class="w-full bg-slate-100 text-slate-700 py-2.5 rounded-xl text-[10px] font-black uppercase tap">Appliquer</button>
+                <div class="mt-3">
+                    <label class="text-[9px] font-black uppercase text-slate-400 block mb-1">Note personnelle</label>
+                    <textarea class="note-textarea" placeholder="Note sur cet exercice..." oninput="saveExNoteFromSettings('${id}', this.value)">${noteVal}</textarea>
+                </div>`;
+        }
         container.appendChild(div);
+    });
+}
+
+function saveExParamsPallof() {
+    const id = 'pallof_press';
+    const weight     = parseFloat(document.getElementById(`ex-weight-${id}`).value);
+    const inc        = parseFloat(document.getElementById(`ex-inc-${id}`).value);
+    const repsFixed  = parseInt(document.getElementById(`ex-reps-fixed-${id}`).value);
+    const rest       = parseInt(document.getElementById(`ex-rest-${id}`).value);
+    const ht         = parseInt(document.getElementById(`ex-ht-${id}`).value);
+    const htMin      = parseInt(document.getElementById(`ex-htmin-${id}`).value);
+    const htMax      = parseInt(document.getElementById(`ex-htmax-${id}`).value);
+    if ([weight, inc, repsFixed, rest, ht, htMin, htMax].some(isNaN)) { toast('Valeurs invalides'); return; }
+    openDialog('Appliquer les modifications ?', `Pallof Press : ${weight} lbs · ${repsFixed} reps · tenir ${ht}s (${htMin}–${htMax}s) · repos ${rest}s`, 'settings-2', () => {
+        const pp = state.accessories[id];
+        pp.weight = weight; pp.inc = inc; pp.repsFixed = repsFixed; pp.rest = rest;
+        pp.holdTimeTarget = ht; pp.holdTimeMin = htMin; pp.holdTimeMax = htMax;
+        pp.repMin = repsFixed; pp.repMax = repsFixed; pp.repTarget = repsFixed;
+        save(); toast('✅ Pallof Press mis à jour'); renderExerciseParamsList();
     });
 }
 
@@ -1920,6 +2041,7 @@ function applyCycleManualEdits() {
         state.cycle.currentWeek  = week;
         state.cycle.nextSession  = next;
         state.cycle.testChoice   = null;
+        state.cycleStartedAt     = Date.now();
         save(); renderCycleStatus(); toast('✅ Cycle mis à jour');
     });
 }
@@ -2018,15 +2140,18 @@ function escapeHtml(str) {
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function openDialog(title, body, icon, okCb, okLabel, cancelCb, cancelLabel) {
+function openDialog(title, body, icon, okCb, okLabel, cancelCb, cancelLabel, scrollContent) {
     document.getElementById('dialog-title').innerText = title;
-    // Si le body contient du HTML (commence par <), l'injecter directement, sinon échapper
-    const bodyEl = document.getElementById('dialog-body');
+    const fixedEl  = document.getElementById('dialog-body-fixed');
+    const scrollEl = document.getElementById('dialog-body-scroll');
+    // Zone fixe : texte simple ou HTML
     if (typeof body === 'string' && body.trimStart().startsWith('<')) {
-        bodyEl.innerHTML = body;
+        fixedEl.innerHTML = body;
     } else {
-        bodyEl.innerHTML = escapeHtml(body).replace(/\n/g, '<br>');
+        fixedEl.innerHTML = escapeHtml(body).replace(/\n/g, '<br>');
     }
+    // Zone scrollable : HTML optionnel (bilan cycle)
+    scrollEl.innerHTML = scrollContent || '';
     document.getElementById('dialog-icon').setAttribute('data-lucide', icon || 'alert-circle');
     document.getElementById('dialog-ok').innerText = okLabel || 'Confirmer';
     const cancelBtn = document.getElementById('dialog-cancel');
@@ -2136,6 +2261,16 @@ function migrateState() {
     });
     // exerciseNotes
     if (!state.exerciseNotes) state.exerciseNotes = {};
+    // cycleStartedAt
+    if (!state.cycleStartedAt) state.cycleStartedAt = 0;
+    // Pallof Press holdTime migration
+    if (state.accessories.pallof_press) {
+        const pp = state.accessories.pallof_press;
+        if (pp.holdTimeTarget === undefined) pp.holdTimeTarget = 3;
+        if (pp.holdTimeMin    === undefined) pp.holdTimeMin    = 3;
+        if (pp.holdTimeMax    === undefined) pp.holdTimeMax    = 5;
+        if (pp.repsFixed      === undefined) pp.repsFixed      = pp.repMin || 8;
+    }
 }
 
 /* ── INIT ── */
