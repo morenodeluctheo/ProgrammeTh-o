@@ -298,12 +298,6 @@
     </div>
     <div class="flex-1 px-5 pb-24 space-y-6 pt-5">
         <div id="modal-ex-sets" class="space-y-3"></div>
-        <div class="bg-slate-50 rounded-[2rem] p-5">
-            <div class="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-3">Montage barre — par côté</div>
-            <div id="plate-calc" class="flex flex-wrap gap-2 min-h-[32px]">
-                <span class="text-[11px] font-medium text-slate-400 italic">Sélectionnez une série</span>
-            </div>
-        </div>
         <div id="velocity-section" class="hidden">
             <label class="flex items-start gap-4 p-5 bg-violet-50 border-2 border-violet-100 rounded-[2rem] cursor-pointer">
                 <input type="checkbox" id="velocity-check" class="mt-0.5 w-5 h-5 accent-violet-600 shrink-0">
@@ -530,7 +524,7 @@ const INITIAL_STATE = {
     history:  [],
     exerciseNotes: {},
     sessionDraft: null,
-    cycleStartedAt: 0,
+    cycleStartedAt: {},
     lastUpdated:  0
 };
 
@@ -893,8 +887,29 @@ function renderActiveSession() {
         div.addEventListener('click', () => openExModal(idx));
         list.appendChild(div);
     });
+
+    // Note de séance
+    let noteDiv = document.getElementById('session-note-block');
+    if (!noteDiv) {
+        noteDiv = document.createElement('div');
+        noteDiv.id = 'session-note-block';
+        noteDiv.className = 'bg-white rounded-[2rem] p-5 border-2 border-slate-100';
+        noteDiv.innerHTML = `
+            <label class="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-1 mb-2">
+                <i data-lucide="pencil-line" class="w-3 h-3"></i> Note de séance
+            </label>
+            <textarea id="session-note-input" class="note-textarea" placeholder="Ajouter une note sur cette séance..." oninput="saveSessionNote(this.value)">${state.sessionDraft.sessionNote || ''}</textarea>`;
+        list.parentElement.appendChild(noteDiv);
+    } else {
+        document.getElementById('session-note-input').value = state.sessionDraft.sessionNote || '';
+    }
+
     checkSessionCanFinish();
     lucide.createIcons();
+}
+
+function saveSessionNote(value) {
+    if (state.sessionDraft) { state.sessionDraft.sessionNote = value; save(); }
 }
 
 function skipExercise(idx) {
@@ -1051,7 +1066,7 @@ function openExModal(idx) {
 
     modal.classList.remove('hidden');
     lucide.createIcons();
-    if (ex.sets && ex.sets[0]) renderPlates(ex.sets[0].weight);
+    
 }
 
 function saveExNote(value) {
@@ -1093,9 +1108,9 @@ function renderExModalSets(ex, idx) {
                 const row = document.createElement('div');
                 row.className = 'flex items-center justify-between';
                 const stepperHtml = buildStepper(`ss_${idx}_${r}_${subIdx}`, setData.repsReal !== null && setData.repsReal !== undefined ? setData.repsReal : setData.repsTarget,
-                    `updateSSRep(${idx}, ${r}, ${subIdx}, this.value, this)`, `renderPlates(${setData.weight})`);
+                    `updateSSRep(${idx}, ${r}, ${subIdx}, this.value, this)`, ``);
                 row.innerHTML = `
-                    <div class="flex-1 pr-3 cursor-pointer" onclick="renderPlates(${setData.weight})">
+                    <div class="flex-1 pr-3 cursor-pointer" >
                         <div class="text-[10px] font-bold text-slate-500">${exName(subId)}</div>
                         <div class="text-xs font-black">${weightDisplay(subId, setData.weight)} · Cible : ${setData.repsTarget}</div>
                     </div>
@@ -1115,9 +1130,9 @@ function renderExModalSets(ex, idx) {
         const nextLabel = sIdx < ex.sets.length - 1 ? `Série ${sIdx + 2}` : 'Fin de l\'exercice';
         const defaultVal = s.repsReal !== null && s.repsReal !== undefined ? s.repsReal : s.repsTarget;
         const stepperHtml = buildStepper(`set_${idx}_${sIdx}`, defaultVal,
-            `updateRep(${idx}, ${sIdx}, this.value, this)`, `renderPlates(${s.weight})`);
+            `updateRep(${idx}, ${sIdx}, this.value, this)`, ``);
         div.innerHTML = `
-            <div class="flex items-center gap-3 flex-1 cursor-pointer" onclick="renderPlates(${s.weight})">
+            <div class="flex items-center gap-3 flex-1 cursor-pointer" >
                 <div class="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center font-black text-xs text-slate-500 shrink-0">${sIdx + 1}</div>
                 <div>
                     <div class="text-[9px] font-bold text-slate-400 uppercase">Objectif</div>
@@ -1378,20 +1393,20 @@ function finishSession() {
             nextIdx = 0;
             state.cycle.currentWeek++;
             if (state.cycle.currentWeek > 4) {
+                // Capturer le numéro du cycle AVANT l'incrément et le wrap
+                const cycleJustFinished = state.cycle.currentCycle;
                 state.cycle.currentWeek = 1;
-                // Enregistrer le début du nouveau cycle
-                state.cycleStartedAt = Date.now();
-                const prevCycle = state.cycle.currentCycle;
-                state.cycle.currentCycle++;
-                if (state.cycle.currentCycle > 2) state.cycle.currentCycle = 1;
+                // Enregistrer le début du nouveau cycle (indexé par futur numéro)
+                const nextCycleNum = state.cycle.currentCycle >= 2 ? 1 : state.cycle.currentCycle + 1;
+                if (!state.cycleStartedAt) state.cycleStartedAt = {};
+                state.cycleStartedAt[nextCycleNum] = Date.now();
+                state.cycle.currentCycle = nextCycleNum;
                 state.cycle.testChoice = null;
                 if (draft.isTest) {
-                    // Test 1RM → décharge
                     state.cycle.isDeload = true;
                     state.cycle.deloadRemaining = 3;
                 } else {
-                    // Semaine normale (cycle 1 OU cycle 2) → proposer progressions
-                    proposeEndCycleProgressions(draft);
+                    proposeEndCycleProgressions(draft, cycleJustFinished);
                 }
             }
         }
@@ -1400,8 +1415,12 @@ function finishSession() {
             state.cycle.deloadRemaining--;
             if (state.cycle.deloadRemaining === 0) {
                 state.cycle.isDeload = false;
-                state.cycleStartedAt = Date.now();
-                proposeEndCycleProgressions(draft);
+                const nextCycleNum2 = state.cycle.currentCycle >= 2 ? 1 : state.cycle.currentCycle + 1;
+                if (!state.cycleStartedAt) state.cycleStartedAt = {};
+                state.cycleStartedAt[nextCycleNum2] = Date.now();
+                const cycleBeforeDeloadEnd = state.cycle.currentCycle;
+                state.cycle.currentCycle = nextCycleNum2;
+                proposeEndCycleProgressions(draft, cycleBeforeDeloadEnd);
             }
         }
     }
@@ -1411,36 +1430,28 @@ function finishSession() {
     router('progress');
 }
 
-function proposeEndCycleProgressions(lastDraft) {
+function proposeEndCycleProgressions(lastDraft, cycleNum) {
     const proposals = [];
-    const cycleJustFinished = state.cycle.currentCycle - 1;
+    const cycleJustFinished = cycleNum;
     const cycleSessions = state.history.filter(h => h.cycle === cycleJustFinished);
 
     // Exercices de force : toujours proposer
     const cIds = ['bench_press', 'deadlift', 'back_squat'];
     for (const id of cIds) {
         const inc = (id === 'bench_press') ? 2.5 : 5;
-        proposals.push({ id, type: 'c', oldORM: state.orm[id], inc });
+        proposals.push({ id, type: 'c', oldORM: state.orm[id], inc, cycleNum: cycleJustFinished });
     }
 
     // Exercices de puissance : chercher dans tout l'historique du cycle
-    // Fallback : si l'exercice n'est pas trouvé dans le cycle (cycle incomplet),
-    // proposer quand même la progression (technique assumée satisfaisante)
     const pIds = ['hang_power_clean', 'hang_power_snatch'];
     for (const pId of pIds) {
-        let techniqueOk = true; // défaut : proposer
-        let found = false;
+        let techniqueOk = true;
         for (let i = cycleSessions.length - 1; i >= 0; i--) {
             const ex = cycleSessions[i].exercises.find(e => e.id === pId && !e.skipped);
-            if (ex) {
-                techniqueOk = ex.techniqueOk !== false;
-                found = true;
-                break;
-            }
+            if (ex) { techniqueOk = ex.techniqueOk !== false; break; }
         }
-        // Proposer si technique ok (ou exercice non trouvé dans cycle = fallback)
         if (techniqueOk) {
-            proposals.push({ id: pId, type: 'p', oldORM: state.orm[pId], inc: 2.5 });
+            proposals.push({ id: pId, type: 'p', oldORM: state.orm[pId], inc: 2.5, cycleNum: cycleJustFinished });
         }
     }
 
@@ -1448,44 +1459,23 @@ function proposeEndCycleProgressions(lastDraft) {
     showNextProgProposal(proposals, 0);
 }
 
-function buildCycleBilan(exId) {
-    const targetCycle = state.cycle.currentCycle - 1;
-    // Fallback cycleStartedAt : date de la première séance du cycle terminé
-    let startTs = state.cycleStartedAt || 0;
-    if (!startTs) {
-        const firstOfCycle = state.history.find(h => h.cycle === targetCycle);
-        startTs = firstOfCycle ? firstOfCycle.date : 0;
-    }
-    // Filtrer sur le cycle terminé ET depuis cycleStartedAt du cycle précédent
-    // On cherche les séances du cycle terminé qui sont postérieures au démarrage de ce cycle
-    // Le cycleStartedAt stocké est celui du cycle COURANT (qui vient de démarrer)
-    // Pour le cycle terminé, on remonte au cycleStartedAt d'avant, donc on filtre simplement
-    // sur h.cycle === targetCycle (le filtrage par date est pour éviter les cycles précédents homonymes)
-    // On prend les séances du dernier "run" de ce cycle numéro en filtrant sur celles
-    // qui sont >= au cycleStartedAt du cycle d'avant (qu'on ne stocke pas directement)
-    // Solution pragmatique : prendre les séances du targetCycle les plus récentes,
-    // groupées en "run" consécutif le plus récent
-    const allOfCycle = state.history.filter(h => h.cycle === targetCycle).sort((a,b) => a.date - b.date);
-    // Trouver la dernière rupture de continuité (gap > 90 jours = nouveau run du même cycle numéro)
-    let runStart = 0;
-    for (let i = allOfCycle.length - 1; i > 0; i--) {
-        const gap = allOfCycle[i].date - allOfCycle[i-1].date;
-        if (gap > 90 * 24 * 3600 * 1000) { runStart = i; break; }
-    }
-    const sessions = allOfCycle.slice(runStart);
+function buildCycleBilan(exId, cycleNum) {
+    const startTs = (state.cycleStartedAt && state.cycleStartedAt[cycleNum]) || 0;
+    // Filtrer sur le cycle et depuis le démarrage enregistré de ce cycle
+    const sessions = state.history
+        .filter(h => h.cycle === cycleNum && (startTs === 0 || h.date >= startTs))
+        .sort((a, b) => b.date - a.date); // plus récentes en premier
+
     if (!sessions.length) return '';
 
     const sessionBlocks = [];
     sessions.forEach(h => {
-        // Chercher l'exercice, qu'il soit complété ou skippé
         const ex = h.exercises.find(e => e.id === exId);
         if (!ex) return;
 
         let pills = '';
         if (ex.skipped || !ex.sets || !ex.sets.length) {
-            // Exercice passé : afficher 0 reps pour chaque set prévu
-            const setCount = (ex.sets && ex.sets.length) ? ex.sets.length : 3;
-            const targets = (ex.sets && ex.sets.length) ? ex.sets.map(s => s.repsTarget) : Array(setCount).fill('?');
+            const targets = (ex.sets && ex.sets.length) ? ex.sets.map(s => s.repsTarget) : Array(3).fill('?');
             pills = targets.map(t =>
                 `<span style="background:#f1f5f9;color:#94a3b8;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;display:inline-block;margin:2px 2px;">×${t}→0</span>`
             ).join('');
@@ -1511,7 +1501,6 @@ function buildCycleBilan(exId) {
             }).join('');
         }
 
-        // Indicateur technique pour exercices de puissance
         let techniqueHtml = '';
         if (!ex.skipped && ex.techniqueOk !== undefined) {
             const ok = ex.techniqueOk !== false;
@@ -1527,10 +1516,10 @@ function buildCycleBilan(exId) {
     });
 
     if (!sessionBlocks.length) return '';
-    if (sessionBlocks.length > 8) sessionBlocks.splice(0, sessionBlocks.length - 8);
+    if (sessionBlocks.length > 8) sessionBlocks.splice(8);
 
-    return `<div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:10px;">
-        <div style="font-size:9px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;text-align:center;">─ Bilan du cycle ─</div>
+    return `<div style="margin-top:4px;padding-top:4px;">
+        <div style="font-size:9px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;text-align:center;">─ Bilan du cycle ${cycleNum} ─</div>
         ${sessionBlocks.join('')}
     </div>`;
 }
@@ -1539,7 +1528,7 @@ function showNextProgProposal(proposals, i) {
     if (i >= proposals.length) { save(); return; }
     const p = proposals[i];
     const newORM = p.oldORM + p.inc;
-    const bilan  = buildCycleBilan(p.id);
+    const bilan  = buildCycleBilan(p.id, p.cycleNum);
     const fixedBody = `<strong>${escapeHtml(exName(p.id))}</strong> : ${p.oldORM} → <strong>${newORM} kg</strong> (+${p.inc} kg)<br><span style="color:#64748b">Voulez-vous appliquer cette progression ?</span>`;
     openDialog('🎉 Fin de cycle — Progression', fixedBody, 'trending-up',
         () => { state.orm[p.id] = newORM; state.ormLastUpdated[p.id] = Date.now(); showNextProgProposal(proposals, i + 1); },
@@ -1803,6 +1792,7 @@ function renderHistory() {
                 </div>
                 <div class="accordion-body px-4 pb-3">
                     <div class="pt-2 border-t border-slate-50 space-y-0">${exDetailsHtml}</div>
+                    ${h.sessionNote ? `<div class="mt-3 pt-3 border-t border-slate-50"><span class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Note</span><p class="text-[11px] font-medium text-slate-600 italic mt-1">${h.sessionNote}</p></div>` : ''}
                 </div>`;
 
             item.querySelector('.accordion-trigger').addEventListener('click', () => {
@@ -2041,7 +2031,8 @@ function applyCycleManualEdits() {
         state.cycle.currentWeek  = week;
         state.cycle.nextSession  = next;
         state.cycle.testChoice   = null;
-        state.cycleStartedAt     = Date.now();
+        if (!state.cycleStartedAt || typeof state.cycleStartedAt !== 'object') state.cycleStartedAt = {};
+        state.cycleStartedAt[cycle] = Date.now();
         save(); renderCycleStatus(); toast('✅ Cycle mis à jour');
     });
 }
@@ -2261,8 +2252,8 @@ function migrateState() {
     });
     // exerciseNotes
     if (!state.exerciseNotes) state.exerciseNotes = {};
-    // cycleStartedAt
-    if (!state.cycleStartedAt) state.cycleStartedAt = 0;
+    // cycleStartedAt : migration vers objet indexé par cycle
+    if (!state.cycleStartedAt || typeof state.cycleStartedAt !== 'object') state.cycleStartedAt = {};
     // Pallof Press holdTime migration
     if (state.accessories.pallof_press) {
         const pp = state.accessories.pallof_press;
