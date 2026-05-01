@@ -60,9 +60,9 @@
         .last-perf-block { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 10px 14px; margin-top: 8px; }
         /* Tiroirs Réglages */
         .drawer-body { overflow: hidden; transition: max-height 0.32s cubic-bezier(0.16,1,0.3,1); max-height: 0; }
-        .drawer-body.open { max-height: 6000px; }
+        .drawer-body.open { overflow: visible; }
         .drawer-inner-body { overflow: hidden; transition: max-height 0.28s cubic-bezier(0.16,1,0.3,1); max-height: 0; }
-        .drawer-inner-body.open { max-height: 4000px; }
+        .drawer-inner-body.open { overflow: visible; }
         .drawer-chevron { transition: transform 0.25s ease; }
         .drawer-chevron.open { transform: rotate(180deg); }
     </style>
@@ -175,7 +175,7 @@
     <section id="tab-settings" class="tab-section space-y-3">
 
         <!-- TIROIR : Éditeur de séances -->
-        <div class="bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden">
+        <div class="bg-white rounded-[2.5rem] border border-slate-100">
             <button class="w-full flex items-center justify-between px-7 py-5 tap" onclick="toggleDrawer('drawer-sessions')">
                 <h3 class="font-black text-sm uppercase flex items-center gap-2">
                     <i data-lucide="calendar-days" class="w-4 h-4 text-indigo-500"></i> Éditeur de séances
@@ -209,7 +209,7 @@
         </div>
 
         <!-- TIROIR : Tableaux de périodisation -->
-        <div class="bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden">
+        <div class="bg-white rounded-[2.5rem] border border-slate-100">
             <button class="w-full flex items-center justify-between px-7 py-5 tap" onclick="toggleDrawer('drawer-period')">
                 <h3 class="font-black text-sm uppercase flex items-center gap-2">
                     <i data-lucide="table-2" class="w-4 h-4 text-teal-500"></i> Tableaux de périodisation
@@ -222,7 +222,7 @@
         </div>
 
         <!-- TIROIR : Bibliothèque & Paramètres -->
-        <div class="bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden">
+        <div class="bg-white rounded-[2.5rem] border border-slate-100">
             <button class="w-full flex items-center justify-between px-7 py-5 tap" onclick="toggleDrawer('drawer-library')">
                 <h3 class="font-black text-sm uppercase flex items-center gap-2">
                     <i data-lucide="library" class="w-4 h-4 text-violet-500"></i> Bibliothèque & Paramètres
@@ -235,7 +235,7 @@
         </div>
 
         <!-- TIROIR : Disques & barre -->
-        <div class="bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden">
+        <div class="bg-white rounded-[2.5rem] border border-slate-100">
             <button class="w-full flex items-center justify-between px-7 py-5 tap" onclick="toggleDrawer('drawer-plates')">
                 <h3 class="font-black text-sm uppercase flex items-center gap-2">
                     <i data-lucide="circle" class="w-4 h-4 text-slate-500"></i> Disques & barre
@@ -267,7 +267,7 @@
         </div>
 
         <!-- TIROIR : Gestion du cycle -->
-        <div class="bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden">
+        <div class="bg-white rounded-[2.5rem] border border-slate-100">
             <button class="w-full flex items-center justify-between px-7 py-5 tap" onclick="toggleDrawer('drawer-cycle')">
                 <h3 class="font-black text-sm uppercase flex items-center gap-2">
                     <i data-lucide="refresh-cw" class="w-4 h-4 text-teal-500"></i> Gestion du cycle
@@ -306,7 +306,7 @@
         </div>
 
         <!-- TIROIR : Synchronisation GitHub Gist -->
-        <div class="bg-slate-900 text-white rounded-[2.5rem] overflow-hidden">
+        <div class="bg-slate-900 text-white rounded-[2.5rem]">
             <button class="w-full flex items-center justify-between px-7 py-5 tap" onclick="toggleDrawer('drawer-gist')">
                 <h3 class="font-black text-sm uppercase flex items-center gap-2">
                     <i data-lucide="github" class="w-4 h-4 text-indigo-400"></i> Synchronisation GitHub Gist
@@ -615,7 +615,6 @@ const INITIAL_STATE = {
     gistToken: '',
     lastUpdated:  0,
     sessions: {},
-    drawerState: { open: [], leaveTs: 0 },
     periodization: {
         c: [
             { week: 1, sets: [ {reps:6, pct:0.94}, {reps:6, pct:0.90}, {reps:6, pct:0.90} ] },
@@ -687,14 +686,23 @@ function refreshActiveDraftIfNeeded() {
                     const cfg = exCfg(subId);
                     const w   = isDload ? r025(cfg.weight * 0.7) : cfg.weight;
                     const rt  = cfg.repTarget !== undefined ? cfg.repTarget : cfg.repMin;
-                    return Array(rounds).fill(null).map(() => ({ weight: w, repsTarget: rt, repsReal: null }));
+                    const ht  = cfg.holdTimeTarget !== undefined ? cfg.holdTimeTarget : undefined;
+                    return Array(rounds).fill(null).map(() => {
+                        const set = { weight: w, repsTarget: rt, repsReal: null };
+                        if (ht !== undefined) set.holdTime = ht;
+                        return set;
+                    });
                 });
                 newDraftEx = { id: cfgEx.id, type: 'ss', exIds: cfgEx.exercises, rounds, restIntra: cfgEx.restIntra, restPost: cfgEx.restPost, subSets, completed: false, skipped: false };
             } else {
                 const prescription = getPrescription(cfgEx.id, cfgEx.type, week, isDload, cfgEx.sets);
                 newDraftEx = {
                     id: cfgEx.id, type: cfgEx.type, rest: cfgEx.rest,
-                    sets: prescription.map(p => ({ weight: p.weight, repsTarget: p.repsTarget, label: p.label, repsReal: null })),
+                    sets: prescription.map(p => {
+                        const s = { weight: p.weight, repsTarget: p.repsTarget, label: p.label, repsReal: null };
+                        if (p.holdTime !== undefined) s.holdTime = p.holdTime;
+                        return s;
+                    }),
                     isTest: false, techniqueOk: true, completed: false, skipped: false
                 };
             }
@@ -719,8 +727,13 @@ function refreshActiveDraftIfNeeded() {
                 if (!cfg) return;
                 const w  = isDload ? r025(cfg.weight * 0.7) : cfg.weight;
                 const rt = cfg.repTarget !== undefined ? cfg.repTarget : cfg.repMin;
+                const ht = cfg.holdTimeTarget !== undefined ? cfg.holdTimeTarget : undefined;
                 (ex.subSets[sIdx] || []).forEach(set => {
-                    if (set.repsReal === null) { set.weight = w; set.repsTarget = rt; changed = true; }
+                    if (set.repsReal === null) {
+                        set.weight = w; set.repsTarget = rt;
+                        if (ht !== undefined) set.holdTime = ht;
+                        changed = true;
+                    }
                 });
             });
             return;
@@ -734,6 +747,9 @@ function refreshActiveDraftIfNeeded() {
             if (set.weight !== np.weight || set.repsTarget !== np.repsTarget) {
                 set.weight = np.weight; set.repsTarget = np.repsTarget; set.label = np.label;
                 changed = true;
+            }
+            if (np.holdTime !== undefined && set.holdTime !== np.holdTime) {
+                set.holdTime = np.holdTime; changed = true;
             }
         });
     });
@@ -822,7 +838,7 @@ function getPrescription(exId, type, week, isDeload, setsOverride) {
         const rt = cfg.repsFixed !== undefined ? cfg.repsFixed : (cfg.repTarget !== undefined ? cfg.repTarget : cfg.repMin);
         const baseSet = { weight: cfg.weight, repsTarget: rt, label: `Cible : ${cfg.repMin}–${cfg.repMax} reps` };
         if (exId === 'pallof_press' && cfg.holdTimeTarget !== undefined) {
-            return Array(n).fill(null).map(() => ({ ...baseSet, holdTime: cfg.holdTimeTarget, label: `${rt} reps · tenir ${cfg.holdTimeTarget}s` }));
+            return Array(n).fill(null).map(() => ({ ...baseSet, holdTime: cfg.holdTimeTarget, label: '' }));
         }
         return Array(n).fill(null).map(() => ({ ...baseSet }));
     }
@@ -858,11 +874,6 @@ function renderPlates(totalWeight) {
 
 /* ── ROUTEUR ── */
 function router(page) {
-    // Si on quitte les réglages, enregistrer le timestamp pour le TTL tiroirs
-    const currentTab = document.querySelector('.tab-section.active');
-    if (currentTab && currentTab.id === 'tab-settings' && page !== 'settings') {
-        recordDrawerLeave();
-    }
     document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
     document.getElementById('tab-' + page).classList.add('active');
     document.querySelectorAll('.nav-btn').forEach(b => { b.classList.remove('text-indigo-600'); b.classList.add('text-slate-400'); });
@@ -1027,7 +1038,12 @@ function startSession(type) {
                 const cfg = exCfg(subId);
                 const w   = isDload ? r025(cfg.weight * 0.7) : cfg.weight;
                 const rt  = cfg.repTarget !== undefined ? cfg.repTarget : cfg.repMin;
-                return Array(rounds).fill(null).map(() => ({ weight: w, repsTarget: rt, repsReal: null }));
+                const ht  = cfg.holdTimeTarget !== undefined ? cfg.holdTimeTarget : undefined;
+                return Array(rounds).fill(null).map(() => {
+                    const set = { weight: w, repsTarget: rt, repsReal: null };
+                    if (ht !== undefined) set.holdTime = ht;
+                    return set;
+                });
             });
             return { id: ex.id, type: 'ss', exIds: ex.exercises, rounds, restIntra: ex.restIntra, restPost: ex.restPost, subSets, completed: false, skipped: false };
         }
@@ -1037,7 +1053,11 @@ function startSession(type) {
         const prescription = getPrescription(ex.id, actualType, week, isDload, overrideSets);
         return {
             id: ex.id, type: actualType, rest: ex.rest,
-            sets: prescription.map(p => ({ weight: p.weight, repsTarget: p.repsTarget, label: p.label, repsReal: null })),
+            sets: prescription.map(p => {
+                const s = { weight: p.weight, repsTarget: p.repsTarget, label: p.label, repsReal: null };
+                if (p.holdTime !== undefined) s.holdTime = p.holdTime;
+                return s;
+            }),
             isTest: isTestEx, techniqueOk: true, completed: false, skipped: false,
             testAttempts: isTestEx ? [] : undefined
         };
@@ -1146,8 +1166,8 @@ function getLastPerfRange(exId) {
                     // Vérifier qu'au moins une valeur existe
                     const hasSome = e.subSets[subIdx].some(s => s.repsReal !== null && s.repsReal !== undefined);
                     if (hasSome) {
-                        // Retourner un format compatible
-                        return e.subSets[subIdx].map(s => ({ weight: s.weight, repsReal: s.repsReal }));
+                        // Retourner un format compatible, en conservant holdTime si présent
+                        return e.subSets[subIdx].map(s => ({ weight: s.weight, repsReal: s.repsReal, ...(s.holdTime !== undefined ? { holdTime: s.holdTime } : {}) }));
                     }
                 }
             }
@@ -1175,11 +1195,14 @@ function getLastPerfFixed(exId, repsTargetPerSet) {
 function formatSetsPerf(sets, exId) {
     if (!sets || !sets.length) return '';
     const cable = exId && isCable(exId);
+    // Détecter holdTime depuis le premier set qui en a un
+    const holdTime = sets.find(s => s.holdTime !== undefined && s.holdTime !== null)?.holdTime;
+    const holdSuffix = holdTime ? ` x ${holdTime}s` : '';
     const allSameWeight = sets.every(s => s.weight === sets[0].weight);
     if (allSameWeight && sets[0].weight !== undefined) {
         const reps = sets.map(s => (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : '—').join(',');
         const wLabel = cable ? `${sets[0].weight}lbs (≈${lbsToKg(sets[0].weight)}kg)` : `${sets[0].weight}kg`;
-        return `${wLabel} × ${reps}`;
+        return `${wLabel} × ${reps}${holdSuffix}`;
     }
     return sets.map(s => {
         const r = (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : '—';
@@ -1188,7 +1211,7 @@ function formatSetsPerf(sets, exId) {
             return `${wLabel}×${r}`;
         }
         return `${r}`;
-    }).join(' - ');
+    }).join(' - ') + holdSuffix;
 }
 
 /* ── FORMATAGE TEMPS DE REPOS ── */
@@ -1315,7 +1338,7 @@ function renderExModalSets(ex, idx) {
                 row.innerHTML = `
                     <div class="flex-1 pr-3 cursor-pointer" >
                         <div class="text-[10px] font-bold text-slate-500">${exName(subId)}</div>
-                        <div class="text-xs font-black">${weightDisplay(subId, setData.weight)} · Cible : ${setData.repsTarget}</div>
+                        <div class="text-xs font-black">${weightDisplay(subId, setData.weight)} · Cible : ${subId === 'pallof_press' && setData.holdTime ? `${setData.repsTarget}x${setData.holdTime}s` : setData.repsTarget}</div>
                     </div>
                     ${stepperHtml}`;
                 wrap.appendChild(row);
@@ -1339,7 +1362,7 @@ function renderExModalSets(ex, idx) {
                 <div class="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center font-black text-xs text-slate-500 shrink-0">${sIdx + 1}</div>
                 <div>
                     <div class="text-[9px] font-bold text-slate-400 uppercase">Objectif</div>
-                    <div class="text-sm font-black">${weightDisplay(ex.id, s.weight)} × ${s.repsTarget}${ex.id === 'pallof_press' && s.holdTime ? ` · tenir ${s.holdTime}s` : ''}</div>
+                    <div class="text-sm font-black">${weightDisplay(ex.id, s.weight)} · Cible : ${s.holdTime ? `${s.repsTarget}x${s.holdTime}s` : s.repsTarget}</div>
                     ${s.label ? `<div class="text-[9px] font-medium text-slate-400">${s.label}</div>` : ''}
                 </div>
             </div>
@@ -2034,7 +2057,10 @@ function renderHistory() {
                         const parts = e.exIds.map((subId, si) => {
                             const s = e.subSets[si][r];
                             const rep = (s.repsReal !== null && s.repsReal !== undefined) ? s.repsReal : '—';
-                            return `${exName(subId)} : ${s.weight}kg × ${rep}`;
+                            const unit = isCable(subId) ? 'lbs' : 'kg';
+                            const pallofCfg = subId === 'pallof_press' ? (state.accessories.pallof_press || null) : null;
+                            const holdSuffix = pallofCfg && pallofCfg.holdTimeTarget ? ` x ${pallofCfg.holdTimeTarget}s` : '';
+                            return `${exName(subId)} : ${s.weight}${unit} × ${rep}${holdSuffix}`;
                         });
                         tourLines.push(`<div class="text-[10px] text-slate-500 font-medium mt-0.5"><span class="font-bold text-slate-700">T${r+1}</span> — ${parts.join(' · ')}</div>`);
                     }
@@ -2869,14 +2895,46 @@ function saveOrm(id) {
 /* ── GESTION DES TIROIRS RÉGLAGES ── */
 let drawerTTLTimer = null;
 
+function _animateDrawer(body, opening, duration) {
+    if (opening) {
+        // Mesure la hauteur réelle avant d'ouvrir
+        body.style.maxHeight = '0px';
+        body.style.overflow  = 'hidden';
+        body.classList.add('open');
+        const target = body.scrollHeight;
+        // Force reflow
+        body.getBoundingClientRect();
+        body.style.maxHeight = target + 'px';
+        // Après la transition, libère max-height pour permettre le scroll naturel
+        setTimeout(() => {
+            if (body.classList.contains('open')) {
+                body.style.maxHeight = 'none';
+                body.style.overflow  = 'visible';
+            }
+        }, duration + 20);
+    } else {
+        // Fermeture : re-contraindre à la hauteur actuelle puis animer vers 0
+        body.style.overflow  = 'hidden';
+        body.style.maxHeight = body.scrollHeight + 'px';
+        body.classList.remove('open');
+        // Force reflow
+        body.getBoundingClientRect();
+        body.style.maxHeight = '0px';
+        setTimeout(() => {
+            if (!body.classList.contains('open')) {
+                body.style.maxHeight = '';
+            }
+        }, duration + 20);
+    }
+}
+
 function toggleDrawer(id) {
     const body    = document.getElementById(id);
     const chevron = document.getElementById('chevron-' + id);
     if (!body) return;
     const isOpen = body.classList.contains('open');
-    body.classList.toggle('open', !isOpen);
     if (chevron) chevron.classList.toggle('open', !isOpen);
-    saveDrawerState();
+    _animateDrawer(body, !isOpen, 320);
 }
 
 function toggleInnerDrawer(id) {
@@ -2884,42 +2942,17 @@ function toggleInnerDrawer(id) {
     const chevron = document.getElementById('chevron-' + id);
     if (!body) return;
     const isOpen = body.classList.contains('open');
-    body.classList.toggle('open', !isOpen);
     if (chevron) chevron.classList.toggle('open', !isOpen);
-    saveDrawerState();
-}
-
-function saveDrawerState() {
-    const open = [];
-    document.querySelectorAll('.drawer-body.open, .drawer-inner-body.open').forEach(el => { if (el.id) open.push(el.id); });
-    if (!state.drawerState) state.drawerState = { open: [], leaveTs: 0 };
-    state.drawerState.open = open;
-    // Ne pas toucher à leaveTs ici — il est géré exclusivement par recordDrawerLeave()
-    save();
-}
-
-function restoreDrawerState() {
-    if (!state.drawerState) return;
-    const age = Date.now() - (state.drawerState.leaveTs || 0);
-    if (age > 10000) return; // TTL expiré → tous fermés
-    (state.drawerState.open || []).forEach(id => {
-        const body    = document.getElementById(id);
-        const chevron = document.getElementById('chevron-' + id);
-        if (body) body.classList.add('open');
-        if (chevron) chevron.classList.add('open');
-    });
-}
-
-// Enregistrer le timestamp de départ de l'onglet réglages dans le router
-function recordDrawerLeave() {
-    if (!state.drawerState) state.drawerState = { open: [], leaveTs: 0 };
-    state.drawerState.leaveTs = Date.now();
-    save();
+    _animateDrawer(body, !isOpen, 280);
 }
 
 function renderSettingsTab() {
-    // Fermer tous les tiroirs sans exception avant le rendu
-    document.querySelectorAll('#tab-settings .drawer-body, #tab-settings .drawer-inner-body').forEach(el => el.classList.remove('open'));
+    // Fermer tous les tiroirs sans exception avant le rendu (classe ET styles inline posés par _animateDrawer)
+    document.querySelectorAll('#tab-settings .drawer-body, #tab-settings .drawer-inner-body').forEach(el => {
+        el.classList.remove('open');
+        el.style.maxHeight = '';
+        el.style.overflow  = '';
+    });
     document.querySelectorAll('#tab-settings .drawer-chevron').forEach(el => el.classList.remove('open'));
 
     renderSessionEditor();
@@ -3321,6 +3354,28 @@ function migrateState() {
         if (pp.holdTimeMin    === undefined) pp.holdTimeMin    = 3;
         if (pp.holdTimeMax    === undefined) pp.holdTimeMax    = 5;
         if (pp.repsFixed      === undefined) pp.repsFixed      = pp.repMin || 8;
+    }
+    // Migration draft existant : ajouter holdTime dans les subSets des supersets si manquant
+    if (state.sessionDraft && state.sessionDraft.exercises) {
+        state.sessionDraft.exercises.forEach(ex => {
+            if (ex.type !== 'ss' || !ex.exIds || !ex.subSets) return;
+            ex.exIds.forEach((subId, sIdx) => {
+                const cfg = (state.accessories && state.accessories[subId]) || (state.heavySecondary && state.heavySecondary[subId]);
+                if (!cfg || cfg.holdTimeTarget === undefined) return;
+                (ex.subSets[sIdx] || []).forEach(set => {
+                    if (set.holdTime === undefined) set.holdTime = cfg.holdTimeTarget;
+                });
+            });
+        });
+        // Migration draft : ajouter holdTime dans les sets standards (exercice isolé Pallof Press)
+        state.sessionDraft.exercises.forEach(ex => {
+            if (ex.type === 'ss' || !ex.sets || ex.id !== 'pallof_press') return;
+            const cfg = state.accessories && state.accessories.pallof_press;
+            if (!cfg || cfg.holdTimeTarget === undefined) return;
+            ex.sets.forEach(set => {
+                if (set.holdTime === undefined) set.holdTime = cfg.holdTimeTarget;
+            });
+        });
     }
 }
 
